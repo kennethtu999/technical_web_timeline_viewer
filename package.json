@@ -1,0 +1,14 @@
+{
+  "name": "technical_web_timeline_viewer",
+  "description": "Round-based evidence preparation and timeline viewer for migration validation.",
+  "private": true,
+  "scripts": {
+    "timeline:install": "npm --prefix apps/timeline-viewer install",
+    "timeline:prepare": "npm --prefix apps/timeline-viewer run prepare:rounds",
+    "timeline:dev": "npm --prefix apps/timeline-viewer run dev",
+    "timeline:build": "npm --prefix apps/timeline-viewer run build",
+    "timeline:round:add": "node ./scripts/manage-rounds.mjs add",
+    "timeline:round:remove": "node ./scripts/manage-rounds.mjs remove",
+    "timeline:round:restart": "node ./scripts/manage-rounds.mjs restart"
+  }
+}

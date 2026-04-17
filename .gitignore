@@ -1,0 +1,10 @@
+node_modules
+apps/timeline-viewer/node_modules
+dist
+thumbnails
+artifacts
+*.log
+.DS_Store
+apps/timeline-viewer/public/generated
+source
+tools/video-to-images/__pycache__
