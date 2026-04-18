@@ -83,6 +83,17 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--capture-offset-frames",
+        type=int,
+        default=8,
+        help=(
+            "Frames to skip from the start of each scene before capturing the "
+            "representative image. Helps avoid transition/animation frames. "
+            "If the scene is shorter than this offset, the middle frame is used instead. "
+            "Default: 8 (~0.27s at 30fps)"
+        ),
+    )
+    parser.add_argument(
         "--scroll-overlap-threshold",
         type=float,
         default=0.9,
@@ -326,6 +337,13 @@ def detect_vertical_scroll_overlap(
     return best_match
 
 
+def compute_capture_frame(start_frame: int, end_frame: int, offset_frames: int) -> int:
+    scene_length = end_frame - start_frame
+    if scene_length < offset_frames:
+        return start_frame + scene_length // 2
+    return start_frame + offset_frames
+
+
 def build_capture_record(
     scene_index: int,
     start_frame: int,
@@ -337,7 +355,9 @@ def build_capture_record(
     overlap_ratio: float,
     overlap_similarity: float,
     overlap_direction: str,
+    capture_offset_frames: int = 0,
 ) -> CaptureRecord:
+    capture_frame = compute_capture_frame(start_frame, end_frame, capture_offset_frames)
     start_seconds = start_frame / fps
     end_seconds = end_frame / fps if end_frame >= start_frame else start_seconds
     duration_seconds = max(0.0, end_seconds - start_seconds)
@@ -351,7 +371,7 @@ def build_capture_record(
         scene_index=scene_index,
         start_frame=start_frame,
         end_frame=end_frame,
-        capture_frame=start_frame,
+        capture_frame=capture_frame,
         start_seconds=round(start_seconds, 3),
         end_seconds=round(end_seconds, 3),
         duration_seconds=round(duration_seconds, 3),
@@ -401,6 +421,7 @@ def process_video(
     video_start: datetime | None,
     scroll_overlap_threshold: float,
     scroll_overlap_similarity: float,
+    capture_offset_frames: int = 8,
 ) -> dict:
     fps, total_frames = load_video_metadata(video_file)
     duration_seconds = round(total_frames / fps, 3) if total_frames else 0.0
@@ -477,7 +498,21 @@ def process_video(
                     )
                     continue
 
-            if not save_image(image_path, frame):
+            capture_frame = compute_capture_frame(start_frame, end_frame, capture_offset_frames)
+            if capture_frame != start_frame:
+                offset_frame = read_frame(capture, capture_frame)
+                if offset_frame is None:
+                    print(
+                        f"Warning scene {index}: unable to read offset frame {capture_frame}, "
+                        f"falling back to start frame {start_frame}."
+                    )
+                    save_frame = frame
+                else:
+                    save_frame = offset_frame
+            else:
+                save_frame = frame
+
+            if not save_image(image_path, save_frame):
                 print(f"Skip scene {index}: unable to write {image_file}.")
                 continue
 
@@ -492,6 +527,7 @@ def process_video(
                 overlap_ratio=overlap_result["overlap_ratio"],
                 overlap_similarity=overlap_result["overlap_similarity"],
                 overlap_direction=overlap_result["overlap_direction"],
+                capture_offset_frames=capture_offset_frames,
             )
             records.append(record)
             last_kept_frame = frame
@@ -517,6 +553,7 @@ def process_video(
         "min_scene_length": min_scene_length,
         "scroll_overlap_threshold": scroll_overlap_threshold,
         "scroll_overlap_similarity": scroll_overlap_similarity,
+        "capture_offset_frames": capture_offset_frames,
         "video_start": video_start.isoformat(timespec="seconds") if video_start else None,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "captures": [asdict(record) for record in records],
@@ -564,6 +601,7 @@ def main() -> None:
                 video_start=video_start,
                 scroll_overlap_threshold=scroll_overlap_threshold,
                 scroll_overlap_similarity=scroll_overlap_similarity,
+                capture_offset_frames=args.capture_offset_frames,
             )
         )
 
