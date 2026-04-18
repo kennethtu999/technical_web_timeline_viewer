@@ -648,31 +648,13 @@ function anchorTagType(anchor, draftAnchor) {
                 :options="roundOptions"
                 @update:value="emit('set-selected-round-id', $event)"
               />
-              <div class="tag-stack">
-                <n-tag
-                  v-if="roundConfigState?.systemId"
-                  size="small"
-                  :bordered="false"
-                  type="info"
-                >
-                  system {{ roundConfigState.systemId }}
-                </n-tag>
-                <n-tag
-                  v-if="roundConfigState?.roundKey"
-                  size="small"
-                  :bordered="false"
-                >
-                  {{ roundConfigState.roundKey }}
-                </n-tag>
-              </div>
             </section>
 
             <section class="control-section">
-              <p class="control-label">Round Config</p>
               <n-input
                 :value="roundConfigText"
                 type="textarea"
-                :autosize="{ minRows: 10, maxRows: 18 }"
+                :autosize="{ minRows: 5, maxRows: 8 }"
                 placeholder="編輯 source/round{n}/round_config.json"
                 @update:value="emit('set-round-config-text', $event)"
               />
@@ -694,9 +676,6 @@ function anchorTagType(anchor, draftAnchor) {
                   {{ roundConfigState.configFile }}
                 </n-tag>
               </div>
-              <p class="helper-text">
-                round 沒有自己的 `round_config.json` 時，系統會先從對應 system default 複製一份。
-              </p>
               <p v-if="roundConfigError" class="helper-text error-text">{{ roundConfigError }}</p>
             </section>
 

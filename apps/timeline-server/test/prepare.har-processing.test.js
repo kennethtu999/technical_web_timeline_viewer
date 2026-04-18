@@ -32,7 +32,7 @@ function formatPreviewLines(summary) {
   });
 }
 
-test("megageb_round1 前 10 個 HAR 處理請求可輸出 preview，且包含 login POST 與取圖秒數", async (t) => {
+test("MEGAGEB_ROUND1 前 10 個 HAR 處理請求可輸出 preview，且包含 login POST 與取圖秒數", async (t) => {
   const actual = await inspectRoundHarProcessing("megageb_round1", {
     limit: 10,
     videoDurationMs: 699867,

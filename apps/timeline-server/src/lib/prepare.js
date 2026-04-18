@@ -630,7 +630,7 @@ export async function prepareRound(roundId) {
 
   const timeline = {
     meta: {
-      title: `${normalizedRoundId.toUpperCase()} Timeline Viewer`,
+      title: `${normalizedRoundId}`,
       sourceRound: normalizedRoundId,
       videoName: path.basename(inputPaths.video),
       sliceCount: slices.length,
