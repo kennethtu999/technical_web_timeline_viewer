@@ -97,6 +97,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  recordingGroups: {
+    type: Array,
+    default: () => [],
+  },
   requestUrlPattern: {
     type: String,
     default: "",
@@ -168,11 +172,13 @@ const emit = defineEmits([
   "handle-lane-event-click",
   "handle-slice-click",
   "nudge-slice-offset",
+  "rename-group",
   "reset-viewer-state",
   "run-baseline-preview",
   "set-baseline-capture-points-text",
   "set-baseline-preview-end-sec",
   "set-baseline-preview-start-sec",
+  "set-recording-group-mode",
   "set-request-kind-filter",
   "set-request-url-pattern",
   "set-selected-group-ids",
@@ -196,6 +202,29 @@ const requestLaneHeight = computed(() => laneHeightFor("requestEvents"));
 const recordingLaneHeight = computed(() => laneHeightFor("recordingEvents"));
 const REQUEST_DETAIL_PANEL_HEIGHT = 420;
 const activeRequestDetailTab = ref("response-text");
+const groupDraftLabels = ref({});
+const RECORDING_MODE_OPTIONS = [
+  {
+    value: "default",
+    shortLabel: "原",
+    title: "預設",
+  },
+  {
+    value: "hide",
+    shortLabel: "隱",
+    title: "Hide",
+  },
+  {
+    value: "shift-left",
+    shortLabel: "左",
+    title: "Shift Left",
+  },
+  {
+    value: "shift-right",
+    shortLabel: "右",
+    title: "Shift Right",
+  },
+];
 
 watch(
   () => props.activeRequestDetail,
@@ -258,6 +287,21 @@ function requestDetailHeightFor(slice) {
 }
 
 function laneHeightFor(laneKey) {
+  if (laneKey === "recordingEvents") {
+    const maxHeight = props.recordingGroups.reduce((currentMax, group) => {
+      if (group.mode === "hide") {
+        return currentMax;
+      }
+
+      const listCount = Math.min(group.events?.length || 0, 8);
+      const headerHeight = 58;
+      const itemHeight = listCount * 22;
+      return Math.max(currentMax, headerHeight + itemHeight + 24);
+    }, 0);
+
+    return Math.max(136, maxHeight);
+  }
+
   const maxHeight = props.slices.reduce((currentMax, slice) => {
     const visibleCount = visibleLaneEvents(slice, laneKey).length;
     const toggleCount = hasCollapsedLaneEvents(slice, laneKey) ? 1 : 0;
@@ -283,12 +327,35 @@ function groupSpan(group, slices) {
   };
 }
 
-function formatOffset(offsetMs) {
-  const numericOffset = Number(offsetMs || 0);
-  if (numericOffset > 0) {
-    return `+${numericOffset}`;
+function ensureGroupDraftLabel(slice) {
+  const targetGroup = props.groups.find((group) => group.id === slice.currentGroupId);
+  const nextLabel = targetGroup?.label || slice.currentGroupLabel || slice.defaultNewGroupLabel;
+  groupDraftLabels.value = {
+    ...groupDraftLabels.value,
+    [slice.id]: nextLabel,
+  };
+}
+
+function groupDraftLabel(slice) {
+  return groupDraftLabels.value[slice.id] || slice.currentGroupLabel || slice.defaultNewGroupLabel;
+}
+
+function setGroupDraftLabel(sliceId, nextValue) {
+  groupDraftLabels.value = {
+    ...groupDraftLabels.value,
+    [sliceId]: nextValue,
+  };
+}
+
+function saveGroupLabel(slice) {
+  const nextLabel = groupDraftLabel(slice).trim() || slice.defaultNewGroupLabel;
+
+  if (slice.currentGroupId) {
+    emit("rename-group", slice.currentGroupId, nextLabel);
+    return;
   }
-  return String(numericOffset);
+
+  emit("create-group-at-slice", slice.id, nextLabel);
 }
 
 function anchorTagType(anchor, draftAnchor) {
@@ -318,72 +385,53 @@ function anchorTagType(anchor, draftAnchor) {
         <section class="timeline-panel">
           <div class="timeline-scroll">
             <div class="timeline-grid" :style="{ gridTemplateColumns: `116px ${timelineWidth}px` }">
-              <div class="lane-name">Offset</div>
-              <div class="lane offset-lane">
-                <div
-                  v-for="slice in slices"
-                  :key="`${slice.id}-offset`"
-                  class="offset-chip"
-                  :class="{
-                    active: slice.hasOffset,
-                    selected: selectedSlice?.id === slice.id,
-                    hidden: slice.isHidden,
-                  }"
-                  :style="{
-                    left: `${slice.displayLeftPx}px`,
-                    width: `${slice.displayWidthPx}px`,
-                  }"
-                >
-                  <button
-                    class="offset-button"
-                    type="button"
-                    @click.stop="emit('nudge-slice-offset', slice.id, -100)"
-                  >
-                    -
-                  </button>
-                  <span class="offset-value">{{ formatOffset(slice.offsetMs) }}</span>
-                  <button
-                    class="offset-button"
-                    type="button"
-                    @click.stop="emit('nudge-slice-offset', slice.id, 100)"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
               <div class="lane-name">Groups</div>
               <div class="lane group-lane">
                 <div
                   v-for="slice in slices"
                   :key="`${slice.id}-group-decision`"
-                  class="group-decision"
-                  :class="{ active: Boolean(slice.currentGroupId) }"
+                  class="group-marker"
+                  :class="{ active: Boolean(slice.currentGroupId), hidden: slice.isHidden }"
                   :style="{
                     left: `${slice.displayLeftPx}px`,
-                    width: `${slice.displayWidthPx}px`,
                   }"
                 >
-                  <div class="group-decision-actions">
-                    <button
-                      class="group-action-button"
-                      type="button"
-                      @click.stop="emit('create-group-at-slice', slice.id)"
-                    >
-                      +
-                    </button>
-                    <button
-                      class="group-action-button secondary"
-                      type="button"
-                      :disabled="!slice.previousGroupId"
-                      @click.stop="emit('assign-slice-to-previous-group', slice.id)"
-                    >
-                      -
-                    </button>
-                  </div>
-                  <span class="group-decision-label">
-                    {{ slice.currentGroupLabel || "ungrouped" }}
-                  </span>
+                  <n-popover trigger="click" placement="bottom" :show-arrow="false" @update:show="(show) => show && ensureGroupDraftLabel(slice)">
+                    <template #trigger>
+                      <button
+                        class="group-dot-button"
+                        type="button"
+                        :title="slice.currentGroupLabel || slice.defaultNewGroupLabel"
+                        :style="{
+                          '--group-color': slice.currentGroupColor || '#355c7d',
+                        }"
+                      />
+                    </template>
+                    <div class="group-editor-card">
+                      <p class="group-editor-title">
+                        {{ slice.currentGroupId ? "編輯群組名稱" : "建立群組" }}
+                      </p>
+                      <n-input
+                        :value="groupDraftLabel(slice)"
+                        size="small"
+                        placeholder="輸入 group 名稱"
+                        @update:value="setGroupDraftLabel(slice.id, $event)"
+                      />
+                      <div class="group-editor-actions">
+                        <n-button size="tiny" type="primary" @click="saveGroupLabel(slice)">
+                          {{ slice.currentGroupId ? "儲存" : "建立" }}
+                        </n-button>
+                        <n-button
+                          v-if="!slice.currentGroupId && slice.previousGroupId"
+                          size="tiny"
+                          secondary
+                          @click="emit('assign-slice-to-previous-group', slice.id)"
+                        >
+                          接前群組
+                        </n-button>
+                      </div>
+                    </div>
+                  </n-popover>
                 </div>
                 <template v-for="group in groups" :key="group.id">
                   <div
@@ -462,36 +510,49 @@ function anchorTagType(anchor, draftAnchor) {
               <div class="lane-name">Recording</div>
               <div class="lane recording-lane" :style="{ minHeight: `${recordingLaneHeight}px` }">
                 <div
-                  v-for="slice in slices"
-                  :key="`${slice.id}-recording`"
-                  class="lane-slice-panel"
+                  v-for="group in recordingGroups"
+                  :key="group.id"
+                  v-show="group.mode !== 'hide'"
+                  class="recording-group-card"
                   :style="{
-                    left: `${slice.displayLeftPx}px`,
+                    left: `${group.leftPx + group.shiftPx}px`,
+                    width: `${Math.min(Math.max(group.widthPx, 180), 260)}px`,
                   }"
                 >
-                  <button
-                    v-for="event in visibleLaneEvents(slice, 'recordingEvents')"
-                    :key="event.id"
-                    class="lane-event recording-event"
-                    type="button"
-                    @click.stop="emit('handle-lane-event-click', slice.id, event, 'recording')"
-                  >
-                    <div class="event-topline">
-                      <n-tag size="small" type="info" :bordered="false">
-                        step {{ event.stepIndex }}
-                      </n-tag>
-                      <span>{{ event.type }}</span>
+                  <div class="recording-group-header">
+                    <div>
+                      <div class="recording-group-title">{{ group.label }}</div>
+                      <div class="recording-group-summary">{{ group.summary }}</div>
                     </div>
-                    <div class="event-title">{{ event.label }}</div>
-                  </button>
-                  <button
-                    v-if="hasCollapsedLaneEvents(slice, 'recordingEvents')"
-                    class="lane-toggle-button"
-                    type="button"
-                    @click.stop="toggleLaneExpanded(slice.id, 'recordingEvents')"
-                  >
-                    {{ isLaneExpanded(slice.id, 'recordingEvents') ? "收起" : "更多" }}
-                  </button>
+                    <div class="recording-mode-buttons">
+                      <button
+                        v-for="option in RECORDING_MODE_OPTIONS"
+                        :key="`${group.id}-${option.value}`"
+                        class="recording-mode-button"
+                        :class="{ active: group.mode === option.value }"
+                        type="button"
+                        :title="option.title"
+                        @click.stop="emit('set-recording-group-mode', group.id, option.value)"
+                      >
+                        {{ option.shortLabel }}
+                      </button>
+                    </div>
+                  </div>
+                  <ul class="recording-list">
+                    <li
+                      v-for="event in group.events"
+                      :key="event.id"
+                    >
+                      <button
+                        class="recording-list-button"
+                        type="button"
+                        @click.stop="emit('handle-lane-event-click', group.startSliceId, event, 'recording')"
+                      >
+                        <span class="recording-step">#{{ event.stepIndex }}</span>
+                        <span class="recording-label">{{ event.label }}</span>
+                      </button>
+                    </li>
+                  </ul>
                 </div>
               </div>
 
@@ -622,9 +683,9 @@ function anchorTagType(anchor, draftAnchor) {
               <p class="control-label">Workspace Stats</p>
               <div class="stats-stack">
                 <n-tag size="small" :bordered="false">{{ timelineStats.visibleSlices }} / {{ timelineStats.totalSlices }} slices</n-tag>
-                <n-tag size="small" :bordered="false">{{ activeOffsetCount }} offsets</n-tag>
                 <n-tag size="small" :bordered="false">{{ timelineStats.hiddenSlices }} hidden</n-tag>
                 <n-tag size="small" :bordered="false">{{ timelineStats.groups }} groups</n-tag>
+                <n-tag size="small" :bordered="false">{{ recordingGroups.length }} recording groups</n-tag>
               </div>
             </section>
 
@@ -656,7 +717,7 @@ function anchorTagType(anchor, draftAnchor) {
                 </n-button>
               </div>
               <p class="helper-text">
-                會把目前 round 的起終點、隱藏圖、offset、zoom、group filter、HAR kinds 與 regex 恢復為預設值。
+                會把目前 round 的起終點、隱藏圖、zoom、group filter、recording group 狀態、HAR kinds 與 regex 恢復為預設值。
               </p>
             </section>
 

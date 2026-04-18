@@ -11,6 +11,8 @@ const THUMBNAIL_SLICE_WIDTH_PX = 144;
 const DEFAULT_PREVIEW_START_SEC = 0;
 const DEFAULT_PREVIEW_END_SEC = 60;
 const PREVIEW_SLICE_MATCH_THRESHOLD_SEC = 1;
+const DEFAULT_RECORDING_GROUP_MODE = "default";
+const RECORDING_GROUP_SHIFT_PX = 56;
 
 function createDefaultViewerState(roundId) {
   return {
@@ -183,6 +185,89 @@ function parseCapturePointsText(rawText) {
         .sort((left, right) => left - right)
     )
   );
+}
+
+function normalizeRecordingGroupMode(rawMode) {
+  const allowedModes = new Set([
+    DEFAULT_RECORDING_GROUP_MODE,
+    "hide",
+    "shift-left",
+    "shift-right",
+  ]);
+  return allowedModes.has(rawMode) ? rawMode : DEFAULT_RECORDING_GROUP_MODE;
+}
+
+function recordingGroupStepLabel(events) {
+  if (!events.length) {
+    return "無步驟";
+  }
+
+  const firstStep = events[0].stepIndex;
+  const lastStep = events.at(-1)?.stepIndex ?? firstStep;
+  return firstStep === lastStep ? `step ${firstStep}` : `step ${firstStep}-${lastStep}`;
+}
+
+function buildRecordingGroups(slices, recordingGroupStates) {
+  const visibleSlices = Array.isArray(slices) ? slices : [];
+  const stateMap = recordingGroupStates || {};
+  const groups = [];
+  let currentGroup = null;
+
+  for (const slice of visibleSlices) {
+    const events = Array.isArray(slice.recordingEvents) ? slice.recordingEvents : [];
+    if (!events.length) {
+      currentGroup = null;
+      continue;
+    }
+
+    const signature = events.map((event) => event.id).join("|");
+    if (currentGroup && currentGroup.signature === signature) {
+      currentGroup.sliceIds.push(slice.id);
+      currentGroup.endSliceId = slice.id;
+      currentGroup.lastDisplayLeftPx = slice.displayLeftPx;
+      currentGroup.lastDisplayWidthPx = slice.displayWidthPx;
+      continue;
+    }
+
+    currentGroup = {
+      id: `recording-group:${events[0].id}:${events.at(-1)?.id ?? events[0].id}`,
+      signature,
+      sliceIds: [slice.id],
+      startSliceId: slice.id,
+      endSliceId: slice.id,
+      firstDisplayLeftPx: slice.displayLeftPx,
+      lastDisplayLeftPx: slice.displayLeftPx,
+      lastDisplayWidthPx: slice.displayWidthPx,
+      events,
+    };
+    groups.push(currentGroup);
+  }
+
+  return groups.map((group, index) => {
+    const mode = normalizeRecordingGroupMode(stateMap[group.id]?.mode);
+    const shiftPx =
+      mode === "shift-left"
+        ? -RECORDING_GROUP_SHIFT_PX
+        : mode === "shift-right"
+          ? RECORDING_GROUP_SHIFT_PX
+          : 0;
+
+    return {
+      id: group.id,
+      orderIndex: index,
+      sliceIds: group.sliceIds,
+      startSliceId: group.startSliceId,
+      endSliceId: group.endSliceId,
+      label: recordingGroupStepLabel(group.events),
+      summary: `${group.events.length} 筆 recording`,
+      events: group.events,
+      mode,
+      leftPx: group.firstDisplayLeftPx,
+      widthPx:
+        group.lastDisplayLeftPx + group.lastDisplayWidthPx - group.firstDisplayLeftPx,
+      shiftPx,
+    };
+  });
 }
 
 function buildPreviewThumbnailOverrideMap(slices, previewResult) {
@@ -609,11 +694,16 @@ export function useTimelineModel() {
         currentGroupLabel: currentGroup?.label || "",
         currentGroupColor: currentGroup?.color || "",
         previousGroupId: findPreviousGroupId(slice.id),
+        defaultNewGroupLabel: `Group ${mergedGroups.value.length + 1}`,
       };
       cursorPx += displayWidthPx + slice.offsetMs * currentZoom;
       return layoutSlice;
     });
   });
+
+  const recordingGroups = computed(() =>
+    buildRecordingGroups(visibleSlices.value, viewerState.value.recordingGroupStates)
+  );
 
   const selectedSlice = computed(() =>
     visibleSlices.value.find((slice) => slice.id === selectedSliceId.value) || null
@@ -687,17 +777,24 @@ export function useTimelineModel() {
   }
 
   function createGroupAtSlice(sliceId) {
+    return createNamedGroupAtSlice(sliceId, null);
+  }
+
+  function createNamedGroupAtSlice(sliceId, requestedLabel) {
     removeSliceFromGroups(sliceId);
 
     const groupIndex = mergedGroups.value.length + 1;
+    const fallbackLabel = `Group ${groupIndex}`;
+    const nextLabel = String(requestedLabel || "").trim() || fallbackLabel;
     const nextGroup = {
       id: `local-group-${Date.now()}-${groupIndex}`,
-      label: `Group ${groupIndex}`,
+      label: nextLabel,
       color: nextGroupColor(groupIndex - 1),
       sliceIds: [sliceId],
     };
 
     localGroups.value = [...localGroups.value, nextGroup];
+    return nextGroup.id;
   }
 
   function appendSliceToGroup(groupId, sliceId) {
@@ -741,6 +838,43 @@ export function useTimelineModel() {
 
     removeSliceFromGroups(sliceId);
     return appendSliceToGroup(previousGroupId, sliceId);
+  }
+
+  function renameGroup(groupId, nextLabel) {
+    const trimmedLabel = String(nextLabel || "").trim();
+    if (!trimmedLabel) {
+      return false;
+    }
+
+    let didUpdate = false;
+
+    if (rawTimeline.value?.groups?.some((group) => group.id === groupId)) {
+      rawTimeline.value.groups = rawTimeline.value.groups.map((group) => {
+        if (group.id !== groupId) {
+          return group;
+        }
+        didUpdate = true;
+        return {
+          ...group,
+          label: trimmedLabel,
+        };
+      });
+    }
+
+    if (localGroups.value.some((group) => group.id === groupId)) {
+      localGroups.value = localGroups.value.map((group) => {
+        if (group.id !== groupId) {
+          return group;
+        }
+        didUpdate = true;
+        return {
+          ...group,
+          label: trimmedLabel,
+        };
+      });
+    }
+
+    return didUpdate;
   }
 
   function updateOffsets(nextOffsets) {
@@ -815,6 +949,24 @@ export function useTimelineModel() {
 
   function setBaselineCapturePointsText(nextValue) {
     baselineCapturePointsText.value = String(nextValue || "");
+  }
+
+  function setRecordingGroupMode(groupId, mode) {
+    const nextMode = normalizeRecordingGroupMode(mode);
+    const nextStates = { ...(viewerState.value.recordingGroupStates || {}) };
+
+    if (nextMode === DEFAULT_RECORDING_GROUP_MODE) {
+      delete nextStates[groupId];
+    } else {
+      nextStates[groupId] = {
+        mode: nextMode,
+      };
+    }
+
+    viewerState.value = {
+      ...viewerState.value,
+      recordingGroupStates: nextStates,
+    };
   }
 
   async function runBaselinePreview() {
@@ -1070,6 +1222,7 @@ export function useTimelineModel() {
     selectedGroupIds,
     selectedSlice,
     selectedSliceId,
+    recordingGroups,
     timelineStats,
     timelineWidth,
     viewerState,
@@ -1083,11 +1236,14 @@ export function useTimelineModel() {
     confirmEndAnchor,
     confirmStartAnchor,
     createGroupAtSlice,
+    createNamedGroupAtSlice,
     handleLaneEventClick,
     handleSliceClick,
     loadTimeline,
     nudgeSliceOffset,
+    renameGroup,
     runBaselinePreview,
+    setRecordingGroupMode,
     setSliceOffset,
     setBaselineCapturePointsText,
     setBaselinePreviewEndSec,
