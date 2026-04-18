@@ -23,15 +23,14 @@
 - focus preview 放大兩級
 - 指定 `source/round{n}` 資料來源
 - 右側 control panel：
-  - 起始點
-  - 結束點
+  - round 選擇
+  - `round_config.json` 文字編輯
   - 隱藏圖片
-  - group / zoom / filter
+  - zoom / HAR URL regex / baseline 預設試轉
 - `viewer-state.json` 本地持久化
   - `start / end anchor`
   - `hiddenSliceIds / offsets`
-  - `zoom / selectedGroupIds`
-  - `requestKindFilter / requestUrlPattern`
+  - `zoom / requestUrlPattern`
   - `RESET` 可回到預設控制台狀態
 - 點擊 HAR 卡片可在下方展開 detail panel
   - `Response Text`
@@ -87,7 +86,7 @@ npm run dev
    - `GET`：`response + 0.5 秒`
    - `POST`：`request - 0.5 秒`、`response + 0.5 秒`
    - 目前只處理 `Content-Type` prefix 為 `text/htm` 的 `GET / POST`
-5. 若存在 `source/baseline/page_login.jpg` 與 `source/baseline/page_login.json`
+5. 若存在 `source/baseline/page_login.jpg` 與 `source/round{n}/round_config.json`
    - 會用 `show_login_page` / `submit_login_page` 對齊登入流程
    - `submit_login_page.video_ms` 代表肉眼看到登入按鈕被按下的影片時間
    - 會用 submit HAR `POST` 的 `request-start - 0.5 秒` 推回有效影片起點
@@ -107,6 +106,7 @@ Round 管理建議流程：
 1. 新增：
    - `npm run timeline:round:add -- round2`
    - 放入 `source/round2/video.mp4`、`source/round2/network.har`、`source/round2/recording.json`
+   - 確認 `source/round2/round_config.json`
 2. 重建：
    - `npm run timeline:round:restart -- round2`
    - 再跑 `npm run timeline:prepare`
@@ -122,8 +122,8 @@ Round 管理建議流程：
 - `ffmpeg -ss` 採用 input 前 seek，效率較好，但仍可能有些微關鍵幀誤差。
 - `timeline-server` 目前用 `node --watch` 做 hot reload，本地開發可自動重啟；但 viewer 若遇到 API schema 變更，仍建議一起刷新頁面確認。
 - 持久化目前走 `timeline-server`，可寫回 `source/round{n}/viewer/viewer-state.json`。
-- baseline 試轉只會依目前 `page_login.json` 設定取圖，不會再改寫定位欄位。
-- `RESET` 目前會把起終點、隱藏圖、offset、zoom、group filter、HAR kinds 與 regex 一次回復預設值。
+- baseline 試轉只會依目前 round 的 `round_config.json` 設定取圖，不會再改寫定位欄位。
+- `RESET` 目前會把起終點、隱藏圖、offset、zoom 與 regex 一次回復預設值。
 - 這版已支援多個 `round` 列表，但目前實際驗證資料仍以 `round1` 為主。
 - HAR URL regex 使用 JavaScript regular expression；若 pattern 寫錯，UI 會提示錯誤並暫不套用 regex 過濾。
 - HAR 明細目前在 `prepare:rounds` 階段先整理成字串摘要放入 `timeline.json`；若後續 round 量體持續放大，可能需要再改成懶載入。

@@ -5,11 +5,12 @@ import { fileURLToPath } from "node:url";
 import {
   applyRoundWithBaseline,
   listPreparedRounds,
-  readBaselinePageLogin,
+  readRoundConfig,
   readRoundMeta,
   readRoundTimeline,
   readRoundViewerState,
   runPreviewCapture,
+  writeRoundConfig,
   writeRoundViewerState,
 } from "./lib/prepare.js";
 
@@ -151,14 +152,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (pathname === "/api/baseline/page-login" && req.method === "GET") {
-      sendJson(res, 200, await readBaselinePageLogin());
-      return;
-    }
-
     const timelineMatch = pathname.match(/^\/api\/rounds\/([^/]+)\/timeline$/);
     if (timelineMatch && req.method === "GET") {
       sendJson(res, 200, await readRoundTimeline(timelineMatch[1]));
+      return;
+    }
+
+    const configMatch = pathname.match(/^\/api\/rounds\/([^/]+)\/config$/);
+    if (configMatch && req.method === "GET") {
+      sendJson(res, 200, await readRoundConfig(configMatch[1]));
+      return;
+    }
+
+    if (configMatch && req.method === "POST") {
+      const body = await readJsonBody(req);
+      sendJson(res, 200, await writeRoundConfig(configMatch[1], body.rawText));
       return;
     }
 

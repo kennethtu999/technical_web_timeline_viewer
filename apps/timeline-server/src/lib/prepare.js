@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   BASELINE_FILES,
   buildBaselineConfigSummary,
+  buildRoundKey,
   buildRoundAssetUrl,
   buildSliceAnchor,
   CANONICAL_INPUTS,
@@ -15,6 +16,7 @@ import {
   DEFAULT_PREVIEW_START_SEC,
   detectBaselineInputs,
   detectRoundInputs,
+  ensureRoundConfig,
   ensureDir,
   extractLocalizedTimestamp,
   fileExists,
@@ -84,9 +86,7 @@ export function resolveEffectiveVideoStart({
   baseline,
   inferredVideoStartMs,
 }) {
-  const submitVideoMs = normalizeConfiguredVideoMs(
-    baseline?.config?.submit_login_page?.video_ms
-  );
+  const submitVideoMs = normalizeConfiguredVideoMs(baseline?.config?.submit_login_page?.video_ms);
 
   if (submitVideoMs == null) {
     throw new Error(
@@ -251,7 +251,7 @@ async function finalizeHarDrivenCaptures({
     videoStart: new Date(videoStartMs).toISOString(),
     videoDurationMs,
     baseline: {
-      configFile: baseline.hasConfig ? BASELINE_FILES.config : null,
+      configFile: baseline.configFile || null,
       imageFile: baseline.hasImage ? BASELINE_FILES.image : null,
       config: buildBaselineConfigSummary(baseline.config),
       loginAnchorSliceId: loginAnchorSlice?.id ?? null,
@@ -337,9 +337,10 @@ function buildRoundMeta({
       loginAnchor:
         baseline.hasConfig || baseline.hasImage
           ? {
-              sourceDir: "source/baseline",
+              imageSourceDir: baseline.hasImage ? "source/baseline" : null,
+              configSourceDir: `source/${roundId}`,
               imageFile: baseline.hasImage ? BASELINE_FILES.image : null,
-              configFile: baseline.hasConfig ? BASELINE_FILES.config : null,
+              configFile: baseline.configFile || null,
               config: buildBaselineConfigSummary(baseline.config),
             }
           : null,
@@ -374,7 +375,10 @@ function normalizePreviewLimit(limit, fallbackValue = 10) {
 async function resolveRoundPrepareInputs(roundId, options = {}) {
   const normalizedRoundId = normalizeRoundId(roundId);
   const inputPaths = await detectRoundInputs(normalizedRoundId);
-  const baseline = await detectBaselineInputs();
+  const [baselineAssets, roundConfig] = await Promise.all([
+    detectBaselineInputs(),
+    ensureRoundConfig(normalizedRoundId),
+  ]);
   const [recording, har] = await Promise.all([
     readJson(inputPaths.recording),
     readJson(inputPaths.har),
@@ -404,6 +408,16 @@ async function resolveRoundPrepareInputs(roundId, options = {}) {
   if (!Number.isFinite(videoDurationMs) || videoDurationMs <= 0) {
     videoDurationMs = probeVideoDurationMs(inputPaths.video);
   }
+
+  const baseline = {
+    ...baselineAssets,
+    hasConfig: true,
+    configFile: roundConfig.configFile,
+    configPath: roundConfig.configPath,
+    config: roundConfig.config,
+    systemId: roundConfig.systemId,
+    roundKey: roundConfig.roundKey,
+  };
 
   const {
     effectiveVideoStartMs,
@@ -715,13 +729,44 @@ export async function writeRoundViewerState(roundId, nextState) {
   return sanitizedState;
 }
 
-export async function readBaselinePageLogin() {
-  const baseline = await detectBaselineInputs();
+export async function readRoundConfig(roundId) {
+  const roundConfig = await ensureRoundConfig(roundId);
   return {
-    rootDir: "source/baseline",
-    configFile: baseline.hasConfig ? BASELINE_FILES.config : null,
-    imageFile: baseline.hasImage ? BASELINE_FILES.image : null,
-    config: baseline.config || {},
+    roundId: roundConfig.roundId,
+    rootDir: roundConfig.rootDir,
+    configFile: roundConfig.configFile,
+    systemId: roundConfig.systemId,
+    roundKey: roundConfig.roundKey,
+    config: roundConfig.config || {},
+    rawText: JSON.stringify(roundConfig.config || {}, null, 2),
+    defaults: {
+      previewStartSec: DEFAULT_PREVIEW_START_SEC,
+      previewEndSec: DEFAULT_PREVIEW_END_SEC,
+    },
+  };
+}
+
+export async function writeRoundConfig(roundId, rawText) {
+  const roundConfig = await ensureRoundConfig(roundId);
+  const parsedConfig = JSON.parse(String(rawText || "{}"));
+  const normalizedConfig = {
+    ...parsedConfig,
+    system_id: String(parsedConfig.system_id || roundConfig.systemId || "").trim() || roundConfig.systemId,
+    round_key:
+      String(parsedConfig.round_key || "").trim() ||
+      buildRoundKey(roundConfig.systemId, roundConfig.roundId),
+  };
+
+  await writeJson(roundConfig.configPath, normalizedConfig);
+
+  return {
+    roundId: roundConfig.roundId,
+    rootDir: roundConfig.rootDir,
+    configFile: roundConfig.configFile,
+    systemId: normalizedConfig.system_id,
+    roundKey: normalizedConfig.round_key,
+    config: normalizedConfig,
+    rawText: JSON.stringify(normalizedConfig, null, 2),
     defaults: {
       previewStartSec: DEFAULT_PREVIEW_START_SEC,
       previewEndSec: DEFAULT_PREVIEW_END_SEC,
@@ -785,7 +830,8 @@ export async function runPreviewCapture({
 }) {
   const normalizedRoundId = normalizeRoundId(roundId);
   const inputPaths = await detectRoundInputs(normalizedRoundId);
-  const baseline = await readBaselinePageLogin();
+  const baselineAssets = await detectBaselineInputs();
+  const roundConfig = await ensureRoundConfig(normalizedRoundId);
   const previewWindow = normalizePreviewWindow(startSec, endSec);
   const previewPoints = normalizePreviewCapturePoints(
     capturePointsSec,
@@ -830,7 +876,15 @@ export async function runPreviewCapture({
     endSec: previewWindow.endSec,
     capturePointsSec: previewPoints,
     imageCount: images.length,
-    baseline,
+    roundConfig: {
+      configFile: roundConfig.configFile,
+      systemId: roundConfig.systemId,
+      roundKey: roundConfig.roundKey,
+      config: roundConfig.config,
+    },
+    baselineImage: {
+      imageFile: baselineAssets.hasImage ? BASELINE_FILES.image : null,
+    },
   };
 
   await writeJson(path.join(previewRoot, "preview.json"), previewReport);

@@ -32,8 +32,8 @@ function formatPreviewLines(summary) {
   });
 }
 
-test("round1 前 10 個 HAR 處理請求可輸出 preview，且包含 login POST 與取圖秒數", async (t) => {
-  const actual = await inspectRoundHarProcessing("round1", {
+test("megageb_round1 前 10 個 HAR 處理請求可輸出 preview，且包含 login POST 與取圖秒數", async (t) => {
+  const actual = await inspectRoundHarProcessing("megageb_round1", {
     limit: 10,
     videoDurationMs: 699867,
   });
@@ -51,7 +51,7 @@ test("round1 前 10 個 HAR 處理請求可輸出 preview，且包含 login POST
     console.log(["前 10 個 HAR 處理預覽", ...lines].join("\n"));
   }
 
-  assert.equal(actual.roundId, "round1");
+  assert.equal(actual.roundId, "megageb_round1");
   assert.equal(actual.items.length, 10);
   assert.equal(actual.totalCaptureCount > 0, true);
   assert.equal(

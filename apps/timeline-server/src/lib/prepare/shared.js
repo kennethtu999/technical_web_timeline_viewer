@@ -11,6 +11,7 @@ const appRoot = path.resolve(srcRoot, "..");
 export const repoRoot = path.resolve(appRoot, "..", "..");
 export const sourceRoot = path.join(repoRoot, "source");
 export const baselineRoot = path.join(sourceRoot, "baseline");
+export const DEFAULT_SYSTEM_ID = "esbgib";
 
 export const JSF_KIND_COLORS = {
   "document-get": "#1f6feb",
@@ -35,8 +36,12 @@ export const DEFAULT_PREVIEW_END_SEC = 60;
 
 export const BASELINE_FILES = {
   image: "page_login.jpg",
-  config: "page_login.json",
 };
+
+export const ROUND_CONFIG_FILE = "round_config.json";
+
+const ROUND_ID_REGEX = /^(?:[a-z0-9][a-z0-9_-]*_)?round\d+$/i;
+const ROUND_ID_PARTS_REGEX = /^(?:([a-z0-9][a-z0-9_-]*)_)?round(\d+)$/i;
 
 export const CANONICAL_INPUTS = {
   video: "video.mp4",
@@ -54,10 +59,40 @@ export function buildRoundAssetUrl(roundId, segments) {
 
 export function normalizeRoundId(rawValue) {
   const nextValue = String(rawValue || "").trim().toLowerCase();
-  if (!/^round\d+$/.test(nextValue)) {
-    throw new Error(`Invalid round id "${rawValue}". Use round{No}, for example round2.`);
+  if (!ROUND_ID_REGEX.test(nextValue)) {
+    throw new Error(
+      `Invalid round id "${rawValue}". Use round{No} or {system}_round{No}, for example round2 or megageb_round1.`
+    );
   }
   return nextValue;
+}
+
+function parseRoundId(roundId) {
+  const normalizedRoundId = normalizeRoundId(roundId);
+  const parts = normalizedRoundId.match(ROUND_ID_PARTS_REGEX);
+  if (!parts) {
+    throw new Error(`Invalid round id "${roundId}".`);
+  }
+
+  return {
+    normalizedRoundId,
+    systemIdFromName: String(parts[1] || "").trim() || null,
+    roundNumber: Number(parts[2]),
+  };
+}
+
+export function extractRoundNumber(roundId) {
+  return parseRoundId(roundId).roundNumber;
+}
+
+export function buildRoundKey(systemId, roundId) {
+  const resolvedSystemId =
+    String(systemId || inferRoundSystemId(roundId) || DEFAULT_SYSTEM_ID).trim() || DEFAULT_SYSTEM_ID;
+  return `${resolvedSystemId}_round_${extractRoundNumber(roundId)}`;
+}
+
+export function getSystemDefaultConfigFileName(systemId) {
+  return `${String(systemId || DEFAULT_SYSTEM_ID).trim()}_round_default.json`;
 }
 
 export function getRoundViewerRoot(roundId) {
@@ -66,6 +101,10 @@ export function getRoundViewerRoot(roundId) {
 
 export function getRoundPreviewRoot(roundId) {
   return path.join(sourceRoot, roundId, "preview");
+}
+
+export function getRoundRoot(roundId) {
+  return path.join(sourceRoot, roundId);
 }
 
 export function createDefaultViewerState(roundId) {
@@ -118,17 +157,28 @@ export async function writeJson(filePath, value) {
 export async function getRoundIds() {
   const entries = await fs.readdir(sourceRoot, { withFileTypes: true });
   return entries
-    .filter((entry) => entry.isDirectory() && /^round\d+$/i.test(entry.name))
+    .filter((entry) => entry.isDirectory() && ROUND_ID_REGEX.test(entry.name))
     .map((entry) => entry.name)
     .sort((left, right) => {
-      const leftNumber = Number(left.replace(/^\D+/g, ""));
-      const rightNumber = Number(right.replace(/^\D+/g, ""));
-      return leftNumber - rightNumber;
+      const leftInfo = parseRoundId(left);
+      const rightInfo = parseRoundId(right);
+
+      if (leftInfo.systemIdFromName !== rightInfo.systemIdFromName) {
+        return String(leftInfo.systemIdFromName || "").localeCompare(
+          String(rightInfo.systemIdFromName || "")
+        );
+      }
+
+      return leftInfo.roundNumber - rightInfo.roundNumber;
     });
 }
 
+export function inferRoundSystemId(roundId) {
+  return parseRoundId(roundId).systemIdFromName || DEFAULT_SYSTEM_ID;
+}
+
 export async function detectRoundInputs(roundId) {
-  const roundRoot = path.join(sourceRoot, roundId);
+  const roundRoot = getRoundRoot(roundId);
   const inputPaths = {
     roundRoot,
     video: path.join(roundRoot, CANONICAL_INPUTS.video),
@@ -158,18 +208,83 @@ export async function detectRoundInputs(roundId) {
 }
 
 export async function detectBaselineInputs() {
-  const configPath = path.join(baselineRoot, BASELINE_FILES.config);
   const imagePath = path.join(baselineRoot, BASELINE_FILES.image);
-  const hasConfig = await fileExists(configPath);
   const hasImage = await fileExists(imagePath);
-  const config = hasConfig ? JSON.parse(await readText(configPath)) : null;
 
   return {
     root: baselineRoot,
-    configPath,
     imagePath,
-    hasConfig,
     hasImage,
+  };
+}
+
+export async function ensureSystemDefaultConfig(systemId) {
+  const normalizedSystemId = String(systemId || DEFAULT_SYSTEM_ID).trim() || DEFAULT_SYSTEM_ID;
+  const configFile = getSystemDefaultConfigFileName(normalizedSystemId);
+  const configPath = path.join(baselineRoot, configFile);
+  const hasConfig = await fileExists(configPath);
+  if (!hasConfig) {
+    throw new Error(
+      `Missing system default config: source/baseline/${configFile}.`
+    );
+  }
+
+  const config = JSON.parse(await readText(configPath));
+  return {
+    systemId: normalizedSystemId,
+    rootDir: "source/baseline",
+    configFile,
+    configPath,
+    hasConfig,
+    config,
+  };
+}
+
+function decorateRoundConfig(config, roundId, systemId) {
+  return {
+    ...(config && typeof config === "object" ? config : {}),
+    system_id: String(
+      (config && typeof config === "object" ? config.system_id : "") || systemId || DEFAULT_SYSTEM_ID
+    ).trim(),
+    round_key: String(
+      (config && typeof config === "object" ? config.round_key : "") ||
+        buildRoundKey(systemId, roundId)
+    ).trim(),
+  };
+}
+
+export async function ensureRoundConfig(roundId) {
+  const normalizedRoundId = normalizeRoundId(roundId);
+  const roundRoot = getRoundRoot(normalizedRoundId);
+  const configPath = path.join(roundRoot, ROUND_CONFIG_FILE);
+  const hasRoundConfig = await fileExists(configPath);
+  const inferredSystemId = inferRoundSystemId(normalizedRoundId);
+
+  if (!hasRoundConfig) {
+    const systemDefault = await ensureSystemDefaultConfig(inferredSystemId);
+    const initialConfig = decorateRoundConfig(
+      systemDefault.config,
+      normalizedRoundId,
+      systemDefault.systemId
+    );
+    await writeJson(configPath, initialConfig);
+  }
+
+  const config = decorateRoundConfig(
+    JSON.parse(await readText(configPath)),
+    normalizedRoundId,
+    inferredSystemId
+  );
+  await writeJson(configPath, config);
+
+  return {
+    roundId: normalizedRoundId,
+    roundRoot,
+    rootDir: `source/${normalizedRoundId}`,
+    configFile: ROUND_CONFIG_FILE,
+    configPath,
+    systemId: config.system_id || inferredSystemId,
+    roundKey: config.round_key || buildRoundKey(inferredSystemId, normalizedRoundId),
     config,
   };
 }
@@ -238,6 +353,8 @@ export function buildBaselineConfigSummary(config) {
   }
 
   return {
+    systemId: String(config.system_id || "").trim() || null,
+    roundKey: String(config.round_key || "").trim() || null,
     excludeUrlExprs: Array.isArray(config.exclude_url_exprs)
       ? config.exclude_url_exprs.map((expr) => String(expr)).filter(Boolean)
       : [],

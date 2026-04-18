@@ -3,6 +3,7 @@
 這是 `timeline-viewer` 對應的輕量後端，負責：
 
 - round index / timeline / viewer state API
+- round config 讀寫 API
 - 依 `submit_login_page.video_ms` 反推影片時間軸
 - baseline 60 秒試轉
 - 全量套用後重新 prepare round
@@ -37,7 +38,8 @@ npm test
 - `GET /api/rounds/:roundId/timeline`
 - `GET /api/rounds/:roundId/state`
 - `POST /api/rounds/:roundId/state`
-- `GET /api/baseline/page-login`
+- `GET /api/rounds/:roundId/config`
+- `POST /api/rounds/:roundId/config`
 - `POST /api/rounds/:roundId/baseline/preview`
 - `POST /api/rounds/:roundId/baseline/apply`
 
@@ -46,12 +48,16 @@ npm test
 - viewer 縮圖：`/assets/rounds/round{n}/viewer/thumbnails/*`
 - baseline 試轉圖：`/assets/rounds/round{n}/preview/{jobId}/*`
 
-## Baseline Config
+## Round Config
 
-`source/baseline/page_login.json` 除了 login 規則外，也可加入：
+每個 system 可在 `source/baseline/{systemId}_round_default.json` 定義預設值，每個 round 則使用 `source/round{n}/round_config.json`。
+
+`round_config.json` 除了 login 規則外，也可加入：
 
 ```json
 {
+  "system_id": "esbgib",
+  "round_key": "esbgib_round_1",
   "submit_login_page": {
     "uri": "/EB/login/login.faces",
     "type": "POST",
@@ -69,7 +75,7 @@ npm test
 - 目前登入定位只保留這一條規則，不再使用 `video_offset_ms` 或 `submit_login_page.recording`
 - `exclude_url_exprs` 會在 HAR capture candidate 階段排除符合的 URL
 - 內容優先視為 regex；regex 失敗時退回 substring 比對
-- baseline `show_login_page` / `submit_login_page` 仍會強制保留，不受排除名單影響
+- `show_login_page` / `submit_login_page` 仍會強制保留，不受排除名單影響
 
 ## 結構說明
 

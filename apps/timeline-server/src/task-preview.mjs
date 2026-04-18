@@ -10,7 +10,9 @@ function parsePointList(rawValue) {
 async function main() {
   const [roundId, startSec, endSec, capturePoints] = process.argv.slice(2);
   if (!roundId) {
-    throw new Error("Usage: npm run preview -- round{No} [startSec] [endSec] [capturePoint1,capturePoint2]");
+    throw new Error(
+      "Usage: npm run preview -- {system}_round{No} [startSec] [endSec] [capturePoint1,capturePoint2]"
+    );
   }
 
   const payload = await runPreviewCapture({

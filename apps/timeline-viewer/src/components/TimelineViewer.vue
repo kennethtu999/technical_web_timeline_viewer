@@ -3,8 +3,6 @@ import { computed, ref, watch } from "vue";
 import {
   NButton,
   NCard,
-  NCheckbox,
-  NCheckboxGroup,
   NEmpty,
   NInput,
   NPopover,
@@ -33,29 +31,13 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  baselineCapturePointsText: {
-    type: String,
-    default: "",
-  },
-  baselineConfig: {
-    type: Object,
-    default: null,
-  },
   baselineError: {
     type: String,
     default: "",
   },
-  baselinePreviewEndSec: {
-    type: Number,
-    default: 60,
-  },
   baselinePreviewResult: {
     type: Object,
     default: null,
-  },
-  baselinePreviewStartSec: {
-    type: Number,
-    default: 0,
   },
   baselineStatus: {
     type: String,
@@ -73,10 +55,6 @@ const props = defineProps({
     type: String,
     default: "",
   },
-  groupFilterOptions: {
-    type: Array,
-    default: () => [],
-  },
   groups: {
     type: Array,
     default: () => [],
@@ -93,13 +71,25 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  requestKindFilter: {
-    type: Array,
-    default: () => [],
-  },
   recordingGroups: {
     type: Array,
     default: () => [],
+  },
+  roundConfigError: {
+    type: String,
+    default: "",
+  },
+  roundConfigState: {
+    type: Object,
+    default: null,
+  },
+  roundConfigStatus: {
+    type: String,
+    default: "idle",
+  },
+  roundConfigText: {
+    type: String,
+    default: "",
   },
   requestUrlPattern: {
     type: String,
@@ -124,10 +114,6 @@ const props = defineProps({
   saveStatus: {
     type: String,
     default: "idle",
-  },
-  selectedGroupIds: {
-    type: Array,
-    default: () => [],
   },
   selectedRoundId: {
     type: String,
@@ -175,13 +161,10 @@ const emit = defineEmits([
   "rename-group",
   "reset-viewer-state",
   "run-baseline-preview",
-  "set-baseline-capture-points-text",
-  "set-baseline-preview-end-sec",
-  "set-baseline-preview-start-sec",
   "set-recording-group-mode",
-  "set-request-kind-filter",
   "set-request-url-pattern",
-  "set-selected-group-ids",
+  "save-round-config",
+  "set-round-config-text",
   "set-selected-round-id",
   "set-slice-offset",
   "set-zoom",
@@ -191,10 +174,14 @@ const emit = defineEmits([
 ]);
 
 const roundOptions = computed(() =>
-  props.rounds.map((round) => ({
-    label: round.id,
-    value: round.id,
-  }))
+  [...props.rounds]
+    .sort((left, right) =>
+      String(left.title || left.id || "").localeCompare(String(right.title || right.id || ""), "zh-Hant")
+    )
+    .map((round) => ({
+      label: round.title || round.id,
+      value: round.id,
+    }))
 );
 
 const expandedLaneKeys = ref(new Set());
@@ -661,32 +648,56 @@ function anchorTagType(anchor, draftAnchor) {
                 :options="roundOptions"
                 @update:value="emit('set-selected-round-id', $event)"
               />
-            </section>
-
-            <section class="control-section">
-              <p class="control-label">Groups</p>
-              <n-select
-                multiple
-                filterable
-                :value="selectedGroupIds"
-                :options="groupFilterOptions"
-                max-tag-count="responsive"
-                placeholder="預設顯示全部 group"
-                @update:value="emit('set-selected-group-ids', $event)"
-              />
-              <p class="helper-text">
-                預設是「全部」；改選特定 group 後，只顯示該 group 內的 timeline 內容。
-              </p>
-            </section>
-
-            <section class="control-section">
-              <p class="control-label">Workspace Stats</p>
-              <div class="stats-stack">
-                <n-tag size="small" :bordered="false">{{ timelineStats.visibleSlices }} / {{ timelineStats.totalSlices }} slices</n-tag>
-                <n-tag size="small" :bordered="false">{{ timelineStats.hiddenSlices }} hidden</n-tag>
-                <n-tag size="small" :bordered="false">{{ timelineStats.groups }} groups</n-tag>
-                <n-tag size="small" :bordered="false">{{ recordingGroups.length }} recording groups</n-tag>
+              <div class="tag-stack">
+                <n-tag
+                  v-if="roundConfigState?.systemId"
+                  size="small"
+                  :bordered="false"
+                  type="info"
+                >
+                  system {{ roundConfigState.systemId }}
+                </n-tag>
+                <n-tag
+                  v-if="roundConfigState?.roundKey"
+                  size="small"
+                  :bordered="false"
+                >
+                  {{ roundConfigState.roundKey }}
+                </n-tag>
               </div>
+            </section>
+
+            <section class="control-section">
+              <p class="control-label">Round Config</p>
+              <n-input
+                :value="roundConfigText"
+                type="textarea"
+                :autosize="{ minRows: 10, maxRows: 18 }"
+                placeholder="編輯 source/round{n}/round_config.json"
+                @update:value="emit('set-round-config-text', $event)"
+              />
+              <div class="anchor-actions">
+                <n-button size="small" type="primary" @click="emit('save-round-config')">
+                  儲存設定
+                </n-button>
+              </div>
+              <div class="tag-stack">
+                <n-tag size="small" :bordered="false">
+                  {{ roundConfigStatus }}
+                </n-tag>
+                <n-tag
+                  v-if="roundConfigState?.configFile"
+                  size="small"
+                  :bordered="false"
+                  type="info"
+                >
+                  {{ roundConfigState.configFile }}
+                </n-tag>
+              </div>
+              <p class="helper-text">
+                round 沒有自己的 `round_config.json` 時，系統會先從對應 system default 複製一份。
+              </p>
+              <p v-if="roundConfigError" class="helper-text error-text">{{ roundConfigError }}</p>
             </section>
 
             <section class="control-section">
@@ -717,7 +728,7 @@ function anchorTagType(anchor, draftAnchor) {
                 </n-button>
               </div>
               <p class="helper-text">
-                會把目前 round 的起終點、隱藏圖、zoom、group filter、recording group 狀態、HAR kinds 與 regex 恢復為預設值。
+                會把目前 round 的 viewer 狀態恢復為預設值，不會改動 `round_config.json`。
               </p>
             </section>
 
@@ -730,7 +741,7 @@ function anchorTagType(anchor, draftAnchor) {
                   :loading="baselineBusy"
                   @click="emit('run-baseline-preview')"
                 >
-                  試轉 60 秒
+                  試轉預設值
                 </n-button>
                 <n-button
                   size="small"
@@ -744,68 +755,26 @@ function anchorTagType(anchor, draftAnchor) {
               <div class="baseline-field-grid">
                 <label class="helper-text">submit_login_page.video_ms</label>
                 <n-input
-                  :value="String(baselineConfig?.config?.submit_login_page?.video_ms ?? '')"
+                  :value="String(roundConfigState?.config?.submit_login_page?.video_ms ?? '')"
                   type="text"
                   readonly
-                  placeholder="請在 source/baseline/page_login.json 設定"
-                />
-                <label class="helper-text" for="baseline-start-input">試轉開始秒數</label>
-                <n-input
-                  id="baseline-start-input"
-                  :value="String(baselinePreviewStartSec)"
-                  type="number"
-                  placeholder="預設 0"
-                  @update:value="emit('set-baseline-preview-start-sec', Number($event || 0))"
-                />
-                <label class="helper-text" for="baseline-end-input">試轉結束秒數</label>
-                <n-input
-                  id="baseline-end-input"
-                  :value="String(baselinePreviewEndSec)"
-                  type="number"
-                  placeholder="預設 60"
-                  @update:value="emit('set-baseline-preview-end-sec', Number($event || 60))"
+                  placeholder="請先在 round_config.json 設定"
                 />
               </div>
-              <n-input
-                :value="baselineCapturePointsText"
-                type="textarea"
-                :autosize="{ minRows: 2, maxRows: 4 }"
-                placeholder="輸入要取圖的秒數，逗號或空白分隔，例如 0, 12.5, 24"
-                @update:value="emit('set-baseline-capture-points-text', $event)"
-              />
-              
               <div class="tag-stack">
                 <n-tag size="small" :bordered="false">{{ baselineStatus }}</n-tag>
-                <n-tag
-                  v-if="baselineConfig?.configFile"
-                  size="small"
-                  :bordered="false"
-                  type="info"
-                >
-                  {{ baselineConfig.configFile }}
-                </n-tag>
                 <n-tag v-if="baselinePreviewResult?.images?.length" size="small" :bordered="false" type="success">
                   已套用 {{ baselinePreviewResult.images.length }} 張試轉圖到 Round
                 </n-tag>
               </div>
               <p class="helper-text">
-                目前定位只使用 `submit_login_page.video_ms`，代表肉眼看到登入按鈕被按下的影片時間。試轉不會再改寫 baseline config。
+                目前試轉固定用預設秒數與預設取圖點，只讀目前 round 的 `round_config.json`，不再額外調整開始秒數、結束秒數與多點取圖清單。
               </p>
               <p v-if="baselineError" class="helper-text error-text">{{ baselineError }}</p>
             </section>
 
             <section class="control-section">
-              <p class="control-label">HAR Kinds</p>
-              <n-checkbox-group
-                :value="requestKindFilter"
-                @update:value="emit('set-request-kind-filter', $event)"
-              >
-                <div class="checkbox-row">
-                  <n-checkbox value="document-get">document-get</n-checkbox>
-                  <n-checkbox value="document-post">document-post</n-checkbox>
-                  <n-checkbox value="ajax">ajax</n-checkbox>
-                </div>
-              </n-checkbox-group>
+              <p class="control-label">HAR URL Regex</p>
               <n-input
                 :value="requestUrlPattern"
                 type="text"
@@ -818,61 +787,6 @@ function anchorTagType(anchor, draftAnchor) {
               <p v-else class="helper-text">
                 支援正向與負向；`javascript` 代表只顯示命中，`!javascript` 代表排除命中，也可用 `/pattern/flags`。
               </p>
-            </section>
-
-            <section class="control-section">
-              <p class="control-label">Start Point</p>
-              <div class="anchor-actions">
-                <n-button size="small" secondary @click="emit('start-picking-start-anchor')">
-                  選擇起始點
-                </n-button>
-                <n-button size="small" type="primary" @click="emit('confirm-start-anchor')">
-                  確定重排
-                </n-button>
-                <n-button size="small" tertiary @click="emit('clear-start-anchor')">
-                  清除起始點
-                </n-button>
-              </div>
-              <div class="tag-stack">
-                <n-tag
-                  v-if="viewerState?.startAnchor"
-                  size="small"
-                  :bordered="false"
-                  :type="anchorTagType(viewerState.startAnchor, draftStartTarget)"
-                >
-                  {{ viewerState.startAnchor.sourceType }} · {{ viewerState.startAnchor.label }}
-                </n-tag>
-                <n-tag v-if="draftStartTarget" size="small" type="warning" :bordered="false">
-                  draft · {{ draftStartTarget.sourceType }} · {{ draftStartTarget.label }}
-                </n-tag>
-              </div>
-              <p class="helper-text">
-                在選擇模式下，可點圖片、HAR item、Recording item。確定後會由該 slice 開始重排。
-              </p>
-            </section>
-
-            <section class="control-section">
-              <p class="control-label">End Point</p>
-              <div class="anchor-actions">
-                <n-button size="small" secondary @click="emit('start-picking-end-anchor')">
-                  選擇結束點
-                </n-button>
-                <n-button size="small" type="primary" @click="emit('confirm-end-anchor')">
-                  確定結束點
-                </n-button>
-                <n-button size="small" tertiary @click="emit('clear-end-anchor')">
-                  清除結束點
-                </n-button>
-              </div>
-              <div class="tag-stack">
-                <n-tag v-if="viewerState?.endAnchor" size="small" type="success" :bordered="false">
-                  {{ viewerState.endAnchor.sourceType }} · {{ viewerState.endAnchor.label }}
-                </n-tag>
-                <n-tag v-if="draftEndTarget" size="small" type="success" :bordered="false">
-                  draft · {{ draftEndTarget.label }}
-                </n-tag>
-              </div>
-              <p class="helper-text">結束點以圖片 slice 為主，其它 lane 會跟著該 slice 對齊。</p>
             </section>
 
             <section class="control-section">
@@ -896,16 +810,6 @@ function anchorTagType(anchor, draftAnchor) {
               <p class="helper-text">
                 編輯模式下所有圖都會顯示，可直接點圖切換是否隱藏；離開編輯模式後，隱藏圖會從主 timeline 收起。
               </p>
-            </section>
-
-            <section class="control-section">
-              <p class="control-label">Mode Hint</p>
-              <p class="helper-text">
-                目前模式：<strong>{{ interactionMode }}</strong>
-              </p>
-              <n-button size="small" tertiary @click="emit('cancel-interaction')">
-                取消暫存選擇
-              </n-button>
             </section>
           </div>
         </n-card>

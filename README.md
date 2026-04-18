@@ -8,19 +8,20 @@
 - `source/round{n}/network.har`
 - `source/round{n}/recording.json`
 
-正式 `HAR-driven` prepare 另外會選讀全域 baseline：
+正式 `HAR-driven` prepare 會讀：
 
 - `source/baseline/page_login.jpg`
-- `source/baseline/page_login.json`
+- `source/baseline/{systemId}_round_default.json`
+- `source/round{n}/round_config.json`
 
-用途是把登入頁代表圖與登入流程設定自動轉成 timeline 的開始錨點。
+用途是把登入頁代表圖與 round 專屬流程設定自動轉成 timeline 的開始錨點。
 
-`page_login.json` 目前可描述：
+`round_config.json` 目前可描述：
 
 - `exclude_url_exprs`
   - 指定要從 HAR capture 候選中排除的 URL expr
   - 支援 regex 字串；若 regex 無法解析，會退回 substring 比對
-  - baseline `show_login_page` / `submit_login_page` 命中的 login 規則不會被這個排除名單吃掉
+  - `show_login_page` / `submit_login_page` 命中的 login 規則不會被這個排除名單吃掉
 - `show_login_page`
   - 登入頁顯示時對應的 HAR request 規則
 - `submit_login_page`
@@ -44,6 +45,7 @@
 1. 新增開始一個 round
    - `npm run timeline:round:add -- round2`
    - 接著把 `video.mp4`、`network.har`、`recording.json` 放進 `source/round2/`
+   - 確認 `source/round2/round_config.json`
    - 再執行 `npm run timeline:prepare`
 2. 啟動 timeline-server
    - `npm run timeline:server`
@@ -132,8 +134,7 @@
   - `GET` 取 `response + 0.5 秒`
   - `POST` 取 `request - 0.5 秒` 與 `response + 0.5 秒`
   - 目前只取 `Content-Type` prefix 為 `text/htm` 的 `GET / POST`
-- 可選讀 `source/baseline/page_login.jpg` 與 `page_login.json` 作為登入開始錨點
-- `Offset` 置頂的 timeline 工作區
+- 可選讀 `source/baseline/page_login.jpg` 與 `source/round{n}/round_config.json` 作為登入開始錨點
 - `Groups` 水道可直接用 `+ / -` 決定：
   - `+` 建立新群組
   - `-` 加入前一個群組
@@ -147,21 +148,19 @@
   - `Response Text` 會盡量去除 HTML tag，改顯示可讀純文字
   - 再點同一筆可收起
 - 右側 `Control Panel` 可設定：
-  - 起始點
-  - 結束點
+  - round 選擇
+  - `round_config.json` 文字編輯
   - 隱藏圖片
-  - Group multiple select filter
-  - HAR kinds filter
   - HAR URL regex filter
   - zoom
-  - baseline 試轉開始秒數、試轉結束秒數、取圖時間點
+  - baseline 預設試轉與全部套用
 - `timeline-server` 提供：
   - `/api/*` round index / timeline / viewer state / baseline preview / baseline apply
   - `/assets/rounds/round{n}/*` viewer 縮圖與試轉圖
   - `dev` 模式支援 hot reload
 - `Timeline panel` 可上下左右捲動，`Control Panel` 保持獨立捲動
 - 本地開發模式下可把 viewer 設定透過 `timeline-server` 寫回 `viewer-state.json`
-  - 目前會保存：起始點、結束點、隱藏圖片、offset、group filter、HAR kinds、HAR URL regex、zoom
+  - 目前主要保存：起始點、結束點、隱藏圖片、offset、HAR URL regex、zoom
   - `RESET` 可讓目前 round 回到預設控制台狀態
 
 這代表目前已能用同一個 round 目錄承接：
@@ -195,7 +194,7 @@
 
 以 `source/round1/` 為例，round 的原始素材、備份檔名或其它參考檔可以保留，但實際進 viewer / prepare 流程時，只有上面三個檔名會被讀取。
 
-另外正式 prepare 會選讀全域 `source/baseline/` 作為登入頁錨點來源，不屬於每個 round 個別必備檔案。
+另外正式 prepare 會讀全域 `source/baseline/page_login.jpg` 與 system default config，再由各 round 的 `round_config.json` 承接自己的設定。
 
 viewer 相關輸出目前位於：
 
@@ -236,4 +235,4 @@ viewer 相關輸出目前位於：
 
 ## 下一步
 
-目前請以 [issue/issue-13/plan.md](./issue/issue-13/plan.md) 作為目前要執行的主計畫，以 [issue/issue-13/impl.md](./issue/issue-13/impl.md) 作為本輪執行紀錄，並以 [AGENTS.md](./AGENTS.md) 作為 AI 協作入口。
+目前請以 [issue/issue-15/plan.md](./issue/issue-15/plan.md) 作為目前要執行的主計畫，以 [issue/issue-15/impl.md](./issue/issue-15/impl.md) 作為本輪執行紀錄，並以 [AGENTS.md](./AGENTS.md) 作為 AI 協作入口。

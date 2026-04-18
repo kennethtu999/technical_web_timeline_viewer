@@ -158,35 +158,6 @@ function arraysEqual(left, right) {
   return left.every((value, index) => value === right[index]);
 }
 
-function buildDefaultPreviewPointText(slices, startSec, endSec) {
-  const normalizedPoints = Array.from(
-    new Set(
-      (Array.isArray(slices) ? slices : [])
-        .map((slice) => Number((Number(slice.startMs || 0) / 1000).toFixed(3)))
-        .filter((value) => Number.isFinite(value) && value >= startSec && value <= endSec)
-    )
-  ).sort((left, right) => left - right);
-
-  const selectedPoints = normalizedPoints.slice(0, 12);
-  if (!selectedPoints.length) {
-    return `${startSec}, ${endSec}`;
-  }
-
-  return selectedPoints.join(", ");
-}
-
-function parseCapturePointsText(rawText) {
-  return Array.from(
-    new Set(
-      String(rawText || "")
-        .split(/[\s,]+/)
-        .map((value) => Number(value.trim()))
-        .filter((value) => Number.isFinite(value) && value >= 0)
-        .sort((left, right) => left - right)
-    )
-  );
-}
-
 function normalizeRecordingGroupMode(rawMode) {
   const allowedModes = new Set([
     DEFAULT_RECORDING_GROUP_MODE,
@@ -324,10 +295,10 @@ export function useTimelineModel() {
   const draftStartTarget = ref(null);
   const draftEndTarget = ref(null);
   const activeRequestDetail = ref(null);
-  const baselineConfig = ref(null);
-  const baselinePreviewStartSec = ref(DEFAULT_PREVIEW_START_SEC);
-  const baselinePreviewEndSec = ref(DEFAULT_PREVIEW_END_SEC);
-  const baselineCapturePointsText = ref("");
+  const roundConfigState = ref(null);
+  const roundConfigText = ref("");
+  const roundConfigStatus = ref("idle");
+  const roundConfigError = ref("");
   const baselinePreviewResult = ref(null);
   const baselinePreviewSliceOverrides = ref({});
   const baselineStatus = ref("idle");
@@ -345,20 +316,20 @@ export function useTimelineModel() {
     });
   }
 
-  async function loadBaselineConfig() {
-    const payload = await fetchJson("/api/baseline/page-login");
-    baselineConfig.value = payload;
+  async function loadRoundConfig(roundId = selectedRoundId.value) {
+    if (!roundId) {
+      return null;
+    }
+
+    const payload = await fetchJson(`/api/rounds/${roundId}/config`);
+    roundConfigState.value = payload;
+    roundConfigText.value = payload.rawText || JSON.stringify(payload.config || {}, null, 2);
+    roundConfigStatus.value = "idle";
+    roundConfigError.value = "";
     return payload;
   }
 
   function resetBaselinePreviewForm() {
-    baselinePreviewStartSec.value = DEFAULT_PREVIEW_START_SEC;
-    baselinePreviewEndSec.value = DEFAULT_PREVIEW_END_SEC;
-    baselineCapturePointsText.value = buildDefaultPreviewPointText(
-      rawTimeline.value?.slices || [],
-      DEFAULT_PREVIEW_START_SEC,
-      DEFAULT_PREVIEW_END_SEC
-    );
     baselinePreviewResult.value = null;
     baselinePreviewSliceOverrides.value = {};
     baselineStatus.value = "idle";
@@ -402,11 +373,8 @@ export function useTimelineModel() {
         ...createDefaultViewerState(roundId),
         ...stateData,
         zoom: clampZoom(stateData?.zoom),
-        selectedGroupIds: normalizeSelectedGroupIds(
-          stateData?.selectedGroupIds,
-          timelineData?.groups || []
-        ),
-        requestKindFilter: normalizeRequestKindFilter(stateData?.requestKindFilter),
+        selectedGroupIds: [ALL_GROUPS_VALUE],
+        requestKindFilter: [...DEFAULT_REQUEST_KINDS],
         requestUrlPattern: String(stateData?.requestUrlPattern || ""),
         roundId,
       });
@@ -417,7 +385,7 @@ export function useTimelineModel() {
       interactionMode.value = "inspect";
       hideEditMode.value = false;
       saveStatus.value = "idle";
-      await loadBaselineConfig();
+      await loadRoundConfig(roundId);
       resetBaselinePreviewForm();
     } catch (loadError) {
       error.value = loadError instanceof Error ? loadError.message : String(loadError);
@@ -432,7 +400,7 @@ export function useTimelineModel() {
     error.value = "";
 
     try {
-      await Promise.all([loadRoundIndex(), loadBaselineConfig()]);
+      await loadRoundIndex();
       await loadTimeline(selectedRoundId.value);
     } catch (loadError) {
       error.value = loadError instanceof Error ? loadError.message : String(loadError);
@@ -939,16 +907,40 @@ export function useTimelineModel() {
     };
   }
 
-  function setBaselinePreviewStartSec(nextValue) {
-    baselinePreviewStartSec.value = Math.max(0, Number(nextValue || 0));
+  function setRoundConfigText(nextValue) {
+    roundConfigText.value = String(nextValue || "");
+    roundConfigStatus.value = "dirty";
+    roundConfigError.value = "";
   }
 
-  function setBaselinePreviewEndSec(nextValue) {
-    baselinePreviewEndSec.value = Math.max(0, Number(nextValue || 0));
-  }
+  async function saveRoundConfig() {
+    if (!selectedRoundId.value) {
+      return;
+    }
 
-  function setBaselineCapturePointsText(nextValue) {
-    baselineCapturePointsText.value = String(nextValue || "");
+    roundConfigStatus.value = "saving";
+    roundConfigError.value = "";
+
+    try {
+      JSON.parse(roundConfigText.value || "{}");
+      const payload = await fetchJson(`/api/rounds/${selectedRoundId.value}/config`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          rawText: roundConfigText.value,
+        }),
+      });
+      roundConfigState.value = payload;
+      roundConfigText.value = payload.rawText || JSON.stringify(payload.config || {}, null, 2);
+      roundConfigStatus.value = "saved";
+      await loadRoundIndex();
+    } catch (configError) {
+      roundConfigStatus.value = "error";
+      roundConfigError.value =
+        configError instanceof Error ? configError.message : String(configError);
+    }
   }
 
   function setRecordingGroupMode(groupId, mode) {
@@ -987,9 +979,9 @@ export function useTimelineModel() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            startSec: Number(baselinePreviewStartSec.value || 0),
-            endSec: Number(baselinePreviewEndSec.value || 0),
-            capturePointsSec: parseCapturePointsText(baselineCapturePointsText.value),
+            startSec: DEFAULT_PREVIEW_START_SEC,
+            endSec: DEFAULT_PREVIEW_END_SEC,
+            capturePointsSec: [],
           }),
         }
       );
@@ -998,7 +990,7 @@ export function useTimelineModel() {
         baselinePreviewResult.value
       );
       baselineStatus.value = "preview-ready";
-      await loadBaselineConfig();
+      await loadRoundConfig(selectedRoundId.value);
     } catch (previewError) {
       baselineStatus.value = "error";
       baselineError.value =
@@ -1194,12 +1186,8 @@ export function useTimelineModel() {
     apiWritable,
     applyBaseline,
     baselineBusy,
-    baselineCapturePointsText,
-    baselineConfig,
     baselineError,
-    baselinePreviewEndSec,
     baselinePreviewResult,
-    baselinePreviewStartSec,
     baselineStatus,
     draftEndTarget,
     draftStartTarget,
@@ -1214,6 +1202,10 @@ export function useTimelineModel() {
     requestKindFilter,
     requestUrlPattern,
     requestUrlRegexState,
+    roundConfigError,
+    roundConfigState,
+    roundConfigStatus,
+    roundConfigText,
     roundSummary,
     rounds,
     saveError,
@@ -1243,11 +1235,10 @@ export function useTimelineModel() {
     nudgeSliceOffset,
     renameGroup,
     runBaselinePreview,
+    saveRoundConfig,
     setRecordingGroupMode,
+    setRoundConfigText,
     setSliceOffset,
-    setBaselineCapturePointsText,
-    setBaselinePreviewEndSec,
-    setBaselinePreviewStartSec,
     setRequestKindFilter,
     setSelectedRoundId,
     setSelectedGroupIds,
