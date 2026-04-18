@@ -499,8 +499,17 @@ def process_video(
                     continue
 
             capture_frame = compute_capture_frame(start_frame, end_frame, capture_offset_frames)
-            save_frame = read_frame(capture, capture_frame) if capture_frame != start_frame else frame
-            if save_frame is None:
+            if capture_frame != start_frame:
+                offset_frame = read_frame(capture, capture_frame)
+                if offset_frame is None:
+                    print(
+                        f"Warning scene {index}: unable to read offset frame {capture_frame}, "
+                        f"falling back to start frame {start_frame}."
+                    )
+                    save_frame = frame
+                else:
+                    save_frame = offset_frame
+            else:
                 save_frame = frame
 
             if not save_image(image_path, save_frame):
