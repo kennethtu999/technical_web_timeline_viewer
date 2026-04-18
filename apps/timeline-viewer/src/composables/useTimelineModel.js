@@ -8,6 +8,9 @@ const MAX_ZOOM = 0.18;
 const SAVE_DEBOUNCE_MS = 450;
 const GROUP_COLORS = ["#355c7d", "#c95f34", "#3a7a6d", "#6b8f2a", "#8f4d76"];
 const THUMBNAIL_SLICE_WIDTH_PX = 144;
+const DEFAULT_PREVIEW_START_SEC = 0;
+const DEFAULT_PREVIEW_END_SEC = 60;
+const PREVIEW_SLICE_MATCH_THRESHOLD_SEC = 1;
 
 function createDefaultViewerState(roundId) {
   return {
@@ -71,6 +74,14 @@ function rotateSlices(slices, anchorSliceId) {
 
 function parseJson(text) {
   return JSON.parse(text);
+}
+
+async function fetchJson(apiUrl, options) {
+  const response = await fetch(apiUrl, options);
+  if (!response.ok) {
+    throw new Error(`Unable to load ${apiUrl} (${response.status})`);
+  }
+  return parseJson(await response.text());
 }
 
 function buildRegexFromPattern(rawPattern) {
@@ -145,6 +156,72 @@ function arraysEqual(left, right) {
   return left.every((value, index) => value === right[index]);
 }
 
+function buildDefaultPreviewPointText(slices, startSec, endSec) {
+  const normalizedPoints = Array.from(
+    new Set(
+      (Array.isArray(slices) ? slices : [])
+        .map((slice) => Number((Number(slice.startMs || 0) / 1000).toFixed(3)))
+        .filter((value) => Number.isFinite(value) && value >= startSec && value <= endSec)
+    )
+  ).sort((left, right) => left - right);
+
+  const selectedPoints = normalizedPoints.slice(0, 12);
+  if (!selectedPoints.length) {
+    return `${startSec}, ${endSec}`;
+  }
+
+  return selectedPoints.join(", ");
+}
+
+function parseCapturePointsText(rawText) {
+  return Array.from(
+    new Set(
+      String(rawText || "")
+        .split(/[\s,]+/)
+        .map((value) => Number(value.trim()))
+        .filter((value) => Number.isFinite(value) && value >= 0)
+        .sort((left, right) => left - right)
+    )
+  );
+}
+
+function buildPreviewThumbnailOverrideMap(slices, previewResult) {
+  const sourceSlices = Array.isArray(slices) ? slices : [];
+  const previewImages = previewResult?.images || [];
+  const overrides = {};
+
+  for (const image of previewImages) {
+    const requestedCaptureSec = Number(image.captureSec);
+    if (!Number.isFinite(requestedCaptureSec)) {
+      continue;
+    }
+
+    let bestSlice = null;
+    let bestDelta = Number.POSITIVE_INFINITY;
+
+    for (const slice of sourceSlices) {
+      const sliceSec = Number(slice.startMs || 0) / 1000;
+      const delta = Math.abs(sliceSec - requestedCaptureSec);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestSlice = slice;
+      }
+    }
+
+    if (!bestSlice || bestDelta > PREVIEW_SLICE_MATCH_THRESHOLD_SEC) {
+      continue;
+    }
+
+    overrides[bestSlice.id] = {
+      assetUrl: image.assetUrl,
+      label: image.label,
+      imageFile: image.imageFile,
+    };
+  }
+
+  return overrides;
+}
+
 export function useTimelineModel() {
   const rounds = ref([]);
   const rawTimeline = ref(null);
@@ -162,31 +239,18 @@ export function useTimelineModel() {
   const draftStartTarget = ref(null);
   const draftEndTarget = ref(null);
   const activeRequestDetail = ref(null);
+  const baselineConfig = ref(null);
+  const baselinePreviewStartSec = ref(DEFAULT_PREVIEW_START_SEC);
+  const baselinePreviewEndSec = ref(DEFAULT_PREVIEW_END_SEC);
+  const baselineCapturePointsText = ref("");
+  const baselinePreviewResult = ref(null);
+  const baselinePreviewSliceOverrides = ref({});
+  const baselineStatus = ref("idle");
+  const baselineError = ref("");
+  const baselineBusy = ref(false);
 
   let saveTimer = null;
   let suppressAutoSave = false;
-
-  async function fetchJsonWithFallback(apiUrl, fallbackUrl, options) {
-    try {
-      const response = await fetch(apiUrl, options);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      return {
-        data: parseJson(await response.text()),
-        fromApi: true,
-      };
-    } catch {
-      const fallbackResponse = await fetch(fallbackUrl, options);
-      if (!fallbackResponse.ok) {
-        throw new Error(`Unable to load ${fallbackUrl} (${fallbackResponse.status})`);
-      }
-      return {
-        data: parseJson(await fallbackResponse.text()),
-        fromApi: false,
-      };
-    }
-  }
 
   function applyViewerState(nextState) {
     suppressAutoSave = true;
@@ -196,14 +260,31 @@ export function useTimelineModel() {
     });
   }
 
-  async function loadRoundIndex() {
-    const { data, fromApi } = await fetchJsonWithFallback(
-      "/api/round-index",
-      "/generated/index.json"
+  async function loadBaselineConfig() {
+    const payload = await fetchJson("/api/baseline/page-login");
+    baselineConfig.value = payload;
+    return payload;
+  }
+
+  function resetBaselinePreviewForm() {
+    baselinePreviewStartSec.value = DEFAULT_PREVIEW_START_SEC;
+    baselinePreviewEndSec.value = DEFAULT_PREVIEW_END_SEC;
+    baselineCapturePointsText.value = buildDefaultPreviewPointText(
+      rawTimeline.value?.slices || [],
+      DEFAULT_PREVIEW_START_SEC,
+      DEFAULT_PREVIEW_END_SEC
     );
+    baselinePreviewResult.value = null;
+    baselinePreviewSliceOverrides.value = {};
+    baselineStatus.value = "idle";
+    baselineError.value = "";
+  }
+
+  async function loadRoundIndex() {
+    const data = await fetchJson("/api/round-index");
 
     rounds.value = data.rounds || [];
-    apiWritable.value = Boolean(data.writable ?? fromApi);
+    apiWritable.value = Boolean(data.writable ?? true);
 
     if (!rounds.value.length) {
       throw new Error("No prepared rounds found. Run timeline:prepare first.");
@@ -225,36 +306,25 @@ export function useTimelineModel() {
     saveError.value = "";
 
     try {
-      const [timelineResult, stateResult] = await Promise.all([
-        fetchJsonWithFallback(
-          `/api/rounds/${roundId}/timeline`,
-          `/generated/${roundId}/timeline.json`
-        ),
-        fetchJsonWithFallback(
-          `/api/rounds/${roundId}/state`,
-          `/generated/${roundId}/viewer-state.json`
-        ).catch(() => ({
-          data: createDefaultViewerState(roundId),
-          fromApi: false,
-        })),
+      const [timelineData, stateData] = await Promise.all([
+        fetchJson(`/api/rounds/${roundId}/timeline`),
+        fetchJson(`/api/rounds/${roundId}/state`).catch(() => createDefaultViewerState(roundId)),
       ]);
 
-      rawTimeline.value = timelineResult.data;
+      rawTimeline.value = timelineData;
       localGroups.value = [];
       applyViewerState({
         ...createDefaultViewerState(roundId),
-        ...stateResult.data,
-        zoom: clampZoom(stateResult.data?.zoom),
+        ...stateData,
+        zoom: clampZoom(stateData?.zoom),
         selectedGroupIds: normalizeSelectedGroupIds(
-          stateResult.data?.selectedGroupIds,
-          timelineResult.data?.groups || []
+          stateData?.selectedGroupIds,
+          timelineData?.groups || []
         ),
-        requestKindFilter: normalizeRequestKindFilter(stateResult.data?.requestKindFilter),
-        requestUrlPattern: String(stateResult.data?.requestUrlPattern || ""),
+        requestKindFilter: normalizeRequestKindFilter(stateData?.requestKindFilter),
+        requestUrlPattern: String(stateData?.requestUrlPattern || ""),
         roundId,
       });
-
-      apiWritable.value = apiWritable.value && stateResult.fromApi;
       selectedSliceId.value = rawTimeline.value?.slices?.[0]?.id ?? null;
       draftStartTarget.value = null;
       draftEndTarget.value = null;
@@ -262,6 +332,8 @@ export function useTimelineModel() {
       interactionMode.value = "inspect";
       hideEditMode.value = false;
       saveStatus.value = "idle";
+      await loadBaselineConfig();
+      resetBaselinePreviewForm();
     } catch (loadError) {
       error.value = loadError instanceof Error ? loadError.message : String(loadError);
       rawTimeline.value = null;
@@ -275,7 +347,7 @@ export function useTimelineModel() {
     error.value = "";
 
     try {
-      await loadRoundIndex();
+      await Promise.all([loadRoundIndex(), loadBaselineConfig()]);
       await loadTimeline(selectedRoundId.value);
     } catch (loadError) {
       error.value = loadError instanceof Error ? loadError.message : String(loadError);
@@ -435,9 +507,13 @@ export function useTimelineModel() {
     const requestUrlMatcher = requestUrlRegexState.value.regex;
     const baseSlices = rawTimeline.value.slices.map((slice) => {
       const offsetMs = Number(viewerState.value.offsets?.[slice.id] ?? slice.baseOffsetMs ?? 0);
+      const previewOverride = baselinePreviewSliceOverrides.value[slice.id] || null;
       return {
         ...slice,
         offsetMs,
+        thumbnailSrc: previewOverride?.assetUrl || slice.thumbnailSrc,
+        previewOverrideLabel: previewOverride?.label || "",
+        displayImageFileName: previewOverride?.imageFile || slice.imageFile || "",
         isHidden: hiddenSliceIdSet.value.has(slice.id),
         requestEvents: slice.requestEvents.filter((event) => {
           if (!normalizeRequestKindFilter(viewerState.value.requestKindFilter).includes(event.kind)) {
@@ -729,6 +805,86 @@ export function useTimelineModel() {
     };
   }
 
+  function setBaselinePreviewStartSec(nextValue) {
+    baselinePreviewStartSec.value = Math.max(0, Number(nextValue || 0));
+  }
+
+  function setBaselinePreviewEndSec(nextValue) {
+    baselinePreviewEndSec.value = Math.max(0, Number(nextValue || 0));
+  }
+
+  function setBaselineCapturePointsText(nextValue) {
+    baselineCapturePointsText.value = String(nextValue || "");
+  }
+
+  async function runBaselinePreview() {
+    if (!selectedRoundId.value) {
+      return;
+    }
+
+    baselineBusy.value = true;
+    baselineStatus.value = "previewing";
+    baselineError.value = "";
+
+    try {
+      baselinePreviewResult.value = await fetchJson(
+        `/api/rounds/${selectedRoundId.value}/baseline/preview`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            startSec: Number(baselinePreviewStartSec.value || 0),
+            endSec: Number(baselinePreviewEndSec.value || 0),
+            capturePointsSec: parseCapturePointsText(baselineCapturePointsText.value),
+          }),
+        }
+      );
+      baselinePreviewSliceOverrides.value = buildPreviewThumbnailOverrideMap(
+        rawTimeline.value?.slices || [],
+        baselinePreviewResult.value
+      );
+      baselineStatus.value = "preview-ready";
+      await loadBaselineConfig();
+    } catch (previewError) {
+      baselineStatus.value = "error";
+      baselineError.value =
+        previewError instanceof Error ? previewError.message : String(previewError);
+    } finally {
+      baselineBusy.value = false;
+    }
+  }
+
+  async function applyBaseline() {
+    if (!selectedRoundId.value) {
+      return;
+    }
+
+    baselineBusy.value = true;
+    baselineStatus.value = "applying";
+    baselineError.value = "";
+
+    try {
+      await fetchJson(`/api/rounds/${selectedRoundId.value}/baseline/apply`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      baselinePreviewSliceOverrides.value = {};
+      await loadRoundIndex();
+      await loadTimeline(selectedRoundId.value);
+      baselineStatus.value = "applied";
+    } catch (applyError) {
+      baselineStatus.value = "error";
+      baselineError.value =
+        applyError instanceof Error ? applyError.message : String(applyError);
+    } finally {
+      baselineBusy.value = false;
+    }
+  }
+
   function toggleHiddenSlice(sliceId) {
     const hiddenSliceIds = new Set(viewerState.value.hiddenSliceIds || []);
     if (hiddenSliceIds.has(sliceId)) {
@@ -884,6 +1040,15 @@ export function useTimelineModel() {
     activeOffsetCount,
     activeRequestDetail,
     apiWritable,
+    applyBaseline,
+    baselineBusy,
+    baselineCapturePointsText,
+    baselineConfig,
+    baselineError,
+    baselinePreviewEndSec,
+    baselinePreviewResult,
+    baselinePreviewStartSec,
+    baselineStatus,
     draftEndTarget,
     draftStartTarget,
     error,
@@ -922,7 +1087,11 @@ export function useTimelineModel() {
     handleSliceClick,
     loadTimeline,
     nudgeSliceOffset,
+    runBaselinePreview,
     setSliceOffset,
+    setBaselineCapturePointsText,
+    setBaselinePreviewEndSec,
+    setBaselinePreviewStartSec,
     setRequestKindFilter,
     setSelectedRoundId,
     setSelectedGroupIds,

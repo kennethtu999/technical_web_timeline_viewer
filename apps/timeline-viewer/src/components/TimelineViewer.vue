@@ -29,6 +29,38 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  baselineBusy: {
+    type: Boolean,
+    default: false,
+  },
+  baselineCapturePointsText: {
+    type: String,
+    default: "",
+  },
+  baselineConfig: {
+    type: Object,
+    default: null,
+  },
+  baselineError: {
+    type: String,
+    default: "",
+  },
+  baselinePreviewEndSec: {
+    type: Number,
+    default: 60,
+  },
+  baselinePreviewResult: {
+    type: Object,
+    default: null,
+  },
+  baselinePreviewStartSec: {
+    type: Number,
+    default: 0,
+  },
+  baselineStatus: {
+    type: String,
+    default: "idle",
+  },
   draftEndTarget: {
     type: Object,
     default: null,
@@ -131,11 +163,16 @@ const emit = defineEmits([
   "confirm-end-anchor",
   "confirm-start-anchor",
   "assign-slice-to-previous-group",
+  "apply-baseline",
   "create-group-at-slice",
   "handle-lane-event-click",
   "handle-slice-click",
   "nudge-slice-offset",
   "reset-viewer-state",
+  "run-baseline-preview",
+  "set-baseline-capture-points-text",
+  "set-baseline-preview-end-sec",
+  "set-baseline-preview-start-sec",
   "set-request-kind-filter",
   "set-request-url-pattern",
   "set-selected-group-ids",
@@ -621,6 +658,79 @@ function anchorTagType(anchor, draftAnchor) {
               <p class="helper-text">
                 會把目前 round 的起終點、隱藏圖、offset、zoom、group filter、HAR kinds 與 regex 恢復為預設值。
               </p>
+            </section>
+
+            <section class="control-section">
+              <p class="control-label">Baseline Trial</p>
+              <div class="anchor-actions">
+                <n-button
+                  size="small"
+                  type="primary"
+                  :loading="baselineBusy"
+                  @click="emit('run-baseline-preview')"
+                >
+                  試轉 60 秒
+                </n-button>
+                <n-button
+                  size="small"
+                  tertiary
+                  :loading="baselineBusy"
+                  @click="emit('apply-baseline')"
+                >
+                  全部套用
+                </n-button>
+              </div>
+              <div class="baseline-field-grid">
+                <label class="helper-text">submit_login_page.video_ms</label>
+                <n-input
+                  :value="String(baselineConfig?.config?.submit_login_page?.video_ms ?? '')"
+                  type="text"
+                  readonly
+                  placeholder="請在 source/baseline/page_login.json 設定"
+                />
+                <label class="helper-text" for="baseline-start-input">試轉開始秒數</label>
+                <n-input
+                  id="baseline-start-input"
+                  :value="String(baselinePreviewStartSec)"
+                  type="number"
+                  placeholder="預設 0"
+                  @update:value="emit('set-baseline-preview-start-sec', Number($event || 0))"
+                />
+                <label class="helper-text" for="baseline-end-input">試轉結束秒數</label>
+                <n-input
+                  id="baseline-end-input"
+                  :value="String(baselinePreviewEndSec)"
+                  type="number"
+                  placeholder="預設 60"
+                  @update:value="emit('set-baseline-preview-end-sec', Number($event || 60))"
+                />
+              </div>
+              <n-input
+                :value="baselineCapturePointsText"
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 4 }"
+                placeholder="輸入要取圖的秒數，逗號或空白分隔，例如 0, 12.5, 24"
+                @update:value="emit('set-baseline-capture-points-text', $event)"
+              />
+              
+              <div class="tag-stack">
+                <n-tag size="small" :bordered="false">{{ baselineStatus }}</n-tag>
+                <n-tag
+                  v-if="baselineConfig?.configFile"
+                  size="small"
+                  :bordered="false"
+                  type="info"
+                >
+                  {{ baselineConfig.configFile }}
+                </n-tag>
+                <n-tag v-if="baselinePreviewResult?.images?.length" size="small" :bordered="false" type="success">
+                  已套用 {{ baselinePreviewResult.images.length }} 張試轉圖到 Round
+                </n-tag>
+              </div>
+              <p class="helper-text">
+                目前定位只使用 `submit_login_page.video_ms`，代表肉眼看到登入按鈕被按下的影片時間。試轉不會再改寫 baseline config。
+              </p>
+              <p v-if="baselineError" class="helper-text error-text">{{ baselineError }}</p>
             </section>
 
             <section class="control-section">

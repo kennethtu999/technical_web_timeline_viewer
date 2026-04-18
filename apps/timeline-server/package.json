@@ -1,0 +1,13 @@
+{
+  "name": "timeline-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch ./src/server-web.mjs",
+    "prepare:rounds": "node ./src/task-prepare.mjs",
+    "preview": "node ./src/task-preview.mjs",
+    "apply": "node ./src/task-apply.mjs",
+    "test": "node --test"
+  }
+}

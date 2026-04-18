@@ -344,6 +344,22 @@ select {
   color: #67707f;
 }
 
+.slice-filename,
+.thumb-preview-filename {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #516070;
+  word-break: break-word;
+}
+
+.slice-filename {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(53, 92, 125, 0.1);
+}
+
 .flags-row {
   justify-content: flex-start;
   flex-wrap: wrap;
@@ -492,6 +508,9 @@ select {
 .inspector-stack,
 .file-alias-list,
 .checkbox-row,
+.baseline-field-grid,
+.baseline-offset-toolbar,
+.baseline-sign-toggle,
 .tag-stack,
 .panel-title-stack,
 .stats-stack {
@@ -529,6 +548,28 @@ select {
 
 .checkbox-row {
   grid-template-columns: 1fr;
+}
+
+.baseline-field-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.baseline-offset-toolbar {
+  grid-template-columns: auto 1fr 1fr;
+  align-items: center;
+}
+
+.baseline-sign-toggle {
+  grid-auto-flow: column;
+  gap: 8px;
+}
+
+.baseline-sign-button {
+  min-width: 48px;
+}
+
+.baseline-nudge-button {
+  justify-self: stretch;
 }
 
 .anchor-actions {
@@ -585,6 +626,14 @@ strong {
 
   .stats-stack {
     grid-template-columns: 1fr;
+  }
+
+  .baseline-offset-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .baseline-sign-toggle {
+    justify-content: flex-start;
   }
 
   .request-detail-panel {

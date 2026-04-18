@@ -17,13 +17,21 @@
 
 `page_login.json` 目前可描述：
 
-- `video_offset_ms`
+- `exclude_url_exprs`
+  - 指定要從 HAR capture 候選中排除的 URL expr
+  - 支援 regex 字串；若 regex 無法解析，會退回 substring 比對
+  - baseline `show_login_page` / `submit_login_page` 命中的 login 規則不會被這個排除名單吃掉
 - `show_login_page`
   - 登入頁顯示時對應的 HAR request 規則
 - `submit_login_page`
   - 登入送出時對應的 HAR request 規則
-  - 可附 `recording.click.string` 作為 Recording 提示字串
-  - 可附 `recording.click.order` 指定第幾次點到登入才算主要送出
+  - 必須附 `video_ms`，表示肉眼看到登入按鈕被按下的影片時間
+
+`submit_login_page.video_ms` 的使用原則：
+
+- prepare 會把它解讀為「肉眼看到按鈕被按下的時間」，不是 HAR request 發出的時間
+- 系統會用命中的 submit HAR `POST` 的 `request-start - 0.5 秒` 反推有效影片起點
+- 目前登入定位只保留這一條規則，不再使用 `video_offset_ms` 或 `recording.click` 類型的人工輔助定位
 
 新截圖模式的前提是：
 
@@ -37,17 +45,21 @@
    - `npm run timeline:round:add -- round2`
    - 接著把 `video.mp4`、`network.har`、`recording.json` 放進 `source/round2/`
    - 再執行 `npm run timeline:prepare`
-2. 啟動 viewer
+2. 啟動 timeline-server
+   - `npm run timeline:server`
+3. 啟動 viewer
    - `npm run timeline:dev`
-3. 移除整個 round 資料
+4. 檢查前 10 個 HAR 處理請求與對應 recording / 取圖秒數
+   - `npm run timeline:test`
+5. 移除整個 round 資料
    - `npm run timeline:round:remove -- round2`
-4. 重新開始同一個 round
+6. 重新開始同一個 round
    - `npm run timeline:round:restart -- round2`
-   - 這會保留三個原始檔，只清掉 `artifacts/`、`viewer/` 與 app 端的 generated 輸出
+   - 這會保留三個原始檔，只清掉 `artifacts/`、`viewer/` 與 `preview/` 輸出
    - 清掉後重新執行 `npm run timeline:prepare`
 
 如果 round 目錄裡還留著舊檔名或備份檔，viewer 目前也只會讀上面這三個固定入口，不再自動猜測檔名。
-`npm run timeline:round:restart -- round1 && npm run timeline:prepare && npm run timeline:dev`
+`npm run timeline:round:restart -- round1 && npm run timeline:prepare && npm run timeline:server && npm run timeline:dev`
 
 ## 專案起源
 
@@ -142,8 +154,13 @@
   - HAR kinds filter
   - HAR URL regex filter
   - zoom
+  - baseline 試轉開始秒數、試轉結束秒數、取圖時間點
+- `timeline-server` 提供：
+  - `/api/*` round index / timeline / viewer state / baseline preview / baseline apply
+  - `/assets/rounds/round{n}/*` viewer 縮圖與試轉圖
+  - `dev` 模式支援 hot reload
 - `Timeline panel` 可上下左右捲動，`Control Panel` 保持獨立捲動
-- 本地開發模式下可把 viewer 設定寫回 `viewer-state.json`
+- 本地開發模式下可把 viewer 設定透過 `timeline-server` 寫回 `viewer-state.json`
   - 目前會保存：起始點、結束點、隱藏圖片、offset、group filter、HAR kinds、HAR URL regex、zoom
   - `RESET` 可讓目前 round 回到預設控制台狀態
 
@@ -186,9 +203,11 @@ viewer 相關輸出目前位於：
 - `source/round1/viewer/viewer-state.json`
 - `source/round1/viewer/round-meta.json`
 - `source/round1/viewer/thumbnails/*`
+- `source/round1/preview/*`
 - `source/round1/artifacts/har-captures/sampling/*`
 
 其中 `sampling/` 目前會固定輸出前 10 秒、每秒一張的保底取樣圖，方便人工快速回看登入前置畫面與時間對齊。
+另外 baseline 試轉圖會落在對應 round 的 `preview/` 目錄，並透過 `GET /assets/rounds/round{n}/preview/...` 提供給 viewer。
 
 這三份資料共同構成：
 
@@ -217,4 +236,4 @@ viewer 相關輸出目前位於：
 
 ## 下一步
 
-目前請以 [issue/issue-12/plan.md](./issue/issue-12/plan.md) 作為目前要執行的主計畫，以 [issue/issue-12/impl.md](./issue/issue-12/impl.md) 作為本輪執行紀錄，並以 [AGENTS.md](./AGENTS.md) 作為 AI 協作入口。
+目前請以 [issue/issue-13/plan.md](./issue/issue-13/plan.md) 作為目前要執行的主計畫，以 [issue/issue-13/impl.md](./issue/issue-13/impl.md) 作為本輪執行紀錄，並以 [AGENTS.md](./AGENTS.md) 作為 AI 協作入口。

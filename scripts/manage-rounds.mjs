@@ -6,7 +6,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 const sourceRoot = path.join(repoRoot, "source");
-const generatedRoot = path.join(repoRoot, "apps", "timeline-viewer", "public", "generated");
 
 const COMMAND = process.argv[2];
 const ROUND_ID = process.argv[3];
@@ -35,30 +34,6 @@ async function fileExists(targetPath) {
   }
 }
 
-async function readJson(filePath) {
-  return JSON.parse(await fs.readFile(filePath, "utf-8"));
-}
-
-async function writeJson(filePath, payload) {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(payload, null, 2), "utf-8");
-}
-
-async function updateGeneratedIndex(roundIdToDrop) {
-  const indexPath = path.join(generatedRoot, "index.json");
-  if (!(await fileExists(indexPath))) {
-    return;
-  }
-
-  const currentIndex = await readJson(indexPath);
-  const nextRounds = (currentIndex.rounds || []).filter((round) => round.id !== roundIdToDrop);
-  await writeJson(indexPath, {
-    ...currentIndex,
-    generatedAt: new Date().toISOString(),
-    rounds: nextRounds,
-  });
-}
-
 async function addRound(roundId) {
   const roundRoot = path.join(sourceRoot, roundId);
   await fs.mkdir(roundRoot, { recursive: true });
@@ -72,13 +47,10 @@ async function addRound(roundId) {
 
 async function removeRound(roundId) {
   const roundRoot = path.join(sourceRoot, roundId);
-  const generatedRoundRoot = path.join(generatedRoot, roundId);
 
   await fs.rm(roundRoot, { recursive: true, force: true });
-  await fs.rm(generatedRoundRoot, { recursive: true, force: true });
-  await updateGeneratedIndex(roundId);
 
-  console.log(`Removed source/${roundId} and generated viewer output.`);
+  console.log(`Removed source/${roundId}.`);
 }
 
 async function restartRound(roundId) {
@@ -89,10 +61,9 @@ async function restartRound(roundId) {
 
   await fs.rm(path.join(roundRoot, "artifacts"), { recursive: true, force: true });
   await fs.rm(path.join(roundRoot, "viewer"), { recursive: true, force: true });
-  await fs.rm(path.join(generatedRoot, roundId), { recursive: true, force: true });
-  await updateGeneratedIndex(roundId);
+  await fs.rm(path.join(roundRoot, "preview"), { recursive: true, force: true });
 
-  console.log(`Cleared artifacts and viewer output for ${roundId}.`);
+  console.log(`Cleared artifacts, preview, and viewer output for ${roundId}.`);
   console.log("Source files were kept. Re-run npm run timeline:prepare to rebuild the timeline.");
 }
 

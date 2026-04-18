@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "timeline:install": "npm --prefix apps/timeline-viewer install",
-    "timeline:prepare": "npm --prefix apps/timeline-viewer run prepare:rounds",
+    "timeline:server": "npm --prefix apps/timeline-server run dev",
+    "timeline:prepare": "npm --prefix apps/timeline-server run prepare:rounds",
+    "timeline:test": "npm --prefix apps/timeline-server test",
     "timeline:dev": "npm --prefix apps/timeline-viewer run dev",
     "timeline:build": "npm --prefix apps/timeline-viewer run build",
     "timeline:round:add": "node ./scripts/manage-rounds.mjs add",

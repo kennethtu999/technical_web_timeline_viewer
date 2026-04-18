@@ -53,6 +53,7 @@
 npm run timeline:round:add -- round2
 npm run timeline:install
 npm run timeline:prepare
+npm run timeline:server
 npm run timeline:dev
 npm run timeline:round:restart -- round2
 npm run timeline:round:remove -- round2
@@ -65,6 +66,12 @@ npm install
 npm run prepare:rounds
 npm run dev
 ```
+
+注意：
+
+- `timeline-viewer` 現在只負責前端畫面。
+- `/api` 與 `/assets` 由 `apps/timeline-server` 提供。
+- 本地開發時請先在 repo root 啟動 `npm run timeline:server`，再啟動 `npm run timeline:dev`。
 
 ## 資料來源
 
@@ -81,10 +88,9 @@ npm run dev
    - `POST`：`request - 0.5 秒`、`response + 0.5 秒`
    - 目前只處理 `Content-Type` prefix 為 `text/htm` 的 `GET / POST`
 5. 若存在 `source/baseline/page_login.jpg` 與 `source/baseline/page_login.json`
-   - 會讀取 `video_offset_ms`
    - 會用 `show_login_page` / `submit_login_page` 對齊登入流程
-   - `submit_login_page.recording.click.string` 會作為 Recording 提示，用來挑選主要登入送出點
-   - `submit_login_page.recording.click.order` 可指定第幾次命中的 click 才算主要登入送出點
+   - `submit_login_page.video_ms` 代表肉眼看到登入按鈕被按下的影片時間
+   - 會用 submit HAR `POST` 的 `request-start - 0.5 秒` 推回有效影片起點
    - 選出的登入頁 slice 會標記為 `login-anchor`
    - baseline 圖會複製成 `thumbnails/login-anchor.jpg`
 6. 輸出 round 內 viewer 資料：
@@ -94,7 +100,7 @@ npm run dev
    - `source/round{n}/viewer/viewer-state.json`
    - `source/round{n}/viewer/round-meta.json`
    - `source/round{n}/viewer/thumbnails/*`
-7. 同步鏡像到 app `public/generated/{round}`
+7. viewer 直接讀 `source/round{n}/viewer/*`，縮圖與試轉圖由 `timeline-server` 透過 `/assets/rounds/round{n}/*` 提供
 
 Round 管理建議流程：
 
@@ -104,6 +110,7 @@ Round 管理建議流程：
 2. 重建：
    - `npm run timeline:round:restart -- round2`
    - 再跑 `npm run timeline:prepare`
+   - 若要檢視 viewer，另外啟動 `npm run timeline:server` 與 `npm run timeline:dev`
 3. 移除：
    - `npm run timeline:round:remove -- round2`
 
@@ -113,7 +120,9 @@ Round 管理建議流程：
 - HAR-driven 縮圖依賴 `video_start`，若起始時間有秒級誤差，整批截圖都會一起偏移。
 - `POST after` 目前採用 `response + 0.5 秒` 推估，若畫面穩定時間較慢，仍可能需要人工回看。
 - `ffmpeg -ss` 採用 input 前 seek，效率較好，但仍可能有些微關鍵幀誤差。
-- 持久化目前走 Vite dev middleware，本地開發可寫回 `source/round{n}/viewer/viewer-state.json`；production build 仍以唯讀檢視為主。
+- `timeline-server` 目前用 `node --watch` 做 hot reload，本地開發可自動重啟；但 viewer 若遇到 API schema 變更，仍建議一起刷新頁面確認。
+- 持久化目前走 `timeline-server`，可寫回 `source/round{n}/viewer/viewer-state.json`。
+- baseline 試轉只會依目前 `page_login.json` 設定取圖，不會再改寫定位欄位。
 - `RESET` 目前會把起終點、隱藏圖、offset、zoom、group filter、HAR kinds 與 regex 一次回復預設值。
 - 這版已支援多個 `round` 列表，但目前實際驗證資料仍以 `round1` 為主。
 - HAR URL regex 使用 JavaScript regular expression；若 pattern 寫錯，UI 會提示錯誤並暫不套用 regex 過濾。
