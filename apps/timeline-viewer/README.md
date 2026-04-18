@@ -16,7 +16,7 @@
   - thumbnail slices
   - request / response
   - recording steps
-- 以 thumbnail slice 為主要切面
+- 以 HAR-driven thumbnail slice 為主要切面
 - slice group
 - `+/- offset ms`
 - thumbnail hover preview
@@ -74,14 +74,27 @@ npm run dev
    - `video.mp4`
    - `network.har`
    - `recording.json`
-2. 呼叫 `tools/video-to-images/screenshot.py` 產生 / 更新縮圖與 manifest
-   - 預設會套用 `50% overlap` 卷動去重規則
-3. 輸出 round 內 viewer 資料：
+2. 從 `recording.title` 或 canonical 檔名推回 `video_start`
+3. 以 `ffprobe` 取得影片長度，並以 `ffmpeg` 直接擷取縮圖
+4. 依 HAR 規則建立 slice：
+   - `GET`：`response + 0.5 秒`
+   - `POST`：`request - 0.5 秒`、`response + 0.5 秒`
+   - 目前只處理 `Content-Type` prefix 為 `text/htm` 的 `GET / POST`
+5. 若存在 `source/baseline/page_login.jpg` 與 `source/baseline/page_login.json`
+   - 會讀取 `video_offset_ms`
+   - 會用 `show_login_page` / `submit_login_page` 對齊登入流程
+   - `submit_login_page.recording.click.string` 會作為 Recording 提示，用來挑選主要登入送出點
+   - `submit_login_page.recording.click.order` 可指定第幾次命中的 click 才算主要登入送出點
+   - 選出的登入頁 slice 會標記為 `login-anchor`
+   - baseline 圖會複製成 `thumbnails/login-anchor.jpg`
+6. 輸出 round 內 viewer 資料：
+   - `source/round{n}/artifacts/har-captures/captures.json`
+   - `source/round{n}/artifacts/har-captures/sampling/*`
    - `source/round{n}/viewer/timeline.json`
    - `source/round{n}/viewer/viewer-state.json`
    - `source/round{n}/viewer/round-meta.json`
    - `source/round{n}/viewer/thumbnails/*`
-4. 同步鏡像到 app `public/generated/{round}`
+7. 同步鏡像到 app `public/generated/{round}`
 
 Round 管理建議流程：
 
@@ -97,7 +110,9 @@ Round 管理建議流程：
 ## 基礎版限制
 
 - Recording 時間目前先用 heuristic mapping，因原始 JSON 沒有明確 step timestamp。
-- 縮圖去重目前依賴垂直卷動 overlap heuristic；對 sticky header、局部內容更新或動畫干擾的頁面，仍可能需要人工回看 `skipped_captures`。
+- HAR-driven 縮圖依賴 `video_start`，若起始時間有秒級誤差，整批截圖都會一起偏移。
+- `POST after` 目前採用 `response + 0.5 秒` 推估，若畫面穩定時間較慢，仍可能需要人工回看。
+- `ffmpeg -ss` 採用 input 前 seek，效率較好，但仍可能有些微關鍵幀誤差。
 - 持久化目前走 Vite dev middleware，本地開發可寫回 `source/round{n}/viewer/viewer-state.json`；production build 仍以唯讀檢視為主。
 - `RESET` 目前會把起終點、隱藏圖、offset、zoom、group filter、HAR kinds 與 regex 一次回復預設值。
 - 這版已支援多個 `round` 列表，但目前實際驗證資料仍以 `round1` 為主。

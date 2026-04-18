@@ -8,6 +8,29 @@
 - `source/round{n}/network.har`
 - `source/round{n}/recording.json`
 
+正式 `HAR-driven` prepare 另外會選讀全域 baseline：
+
+- `source/baseline/page_login.jpg`
+- `source/baseline/page_login.json`
+
+用途是把登入頁代表圖與登入流程設定自動轉成 timeline 的開始錨點。
+
+`page_login.json` 目前可描述：
+
+- `video_offset_ms`
+- `show_login_page`
+  - 登入頁顯示時對應的 HAR request 規則
+- `submit_login_page`
+  - 登入送出時對應的 HAR request 規則
+  - 可附 `recording.click.string` 作為 Recording 提示字串
+  - 可附 `recording.click.order` 指定第幾次點到登入才算主要送出
+
+新截圖模式的前提是：
+
+- 系統已安裝 `ffmpeg` 與 `ffprobe`
+- `video_start` 能從 `recording.title`、`video.mp4` 檔名或 `recording.json` 檔名中正確推回
+- `network.har` 內要有可用的 HTML 類 `GET / POST` 事件
+
 快速操作方式如下：
 
 1. 新增開始一個 round
@@ -24,6 +47,7 @@
    - 清掉後重新執行 `npm run timeline:prepare`
 
 如果 round 目錄裡還留著舊檔名或備份檔，viewer 目前也只會讀上面這三個固定入口，不再自動猜測檔名。
+`npm run timeline:round:restart -- round1 && npm run timeline:prepare && npm run timeline:dev`
 
 ## 專案起源
 
@@ -65,7 +89,7 @@
 核心問題已不再是單純驗證能不能做，而是要讓下面幾件事能穩定支撐實際工作：
 
 1. HAR 和 Recording 的對齊結果能否持續支撐交易或流程層級分析。
-2. 錄影切圖與 timeline viewer 是否足以支撐人工檢查與追溯。
+2. HAR 驅動切圖與 timeline viewer 是否足以支撐人工檢查與追溯。
 3. 哪些資訊已可自動抽取，哪些仍需人工補強，界線是否清楚。
 4. round 操作流程與文件是否足夠穩定，讓下一輪可直接接手。
 
@@ -92,6 +116,11 @@
 
 - 可選擇 `source/round{n}` 指定目錄
 - `video.mp4 / network.har / recording.json` 固定入口命名
+- 以 HAR 關鍵事件驅動縮圖：
+  - `GET` 取 `response + 0.5 秒`
+  - `POST` 取 `request - 0.5 秒` 與 `response + 0.5 秒`
+  - 目前只取 `Content-Type` prefix 為 `text/htm` 的 `GET / POST`
+- 可選讀 `source/baseline/page_login.jpg` 與 `page_login.json` 作為登入開始錨點
 - `Offset` 置頂的 timeline 工作區
 - `Groups` 水道可直接用 `+ / -` 決定：
   - `+` 建立新群組
@@ -149,12 +178,17 @@
 
 以 `source/round1/` 為例，round 的原始素材、備份檔名或其它參考檔可以保留，但實際進 viewer / prepare 流程時，只有上面三個檔名會被讀取。
 
+另外正式 prepare 會選讀全域 `source/baseline/` 作為登入頁錨點來源，不屬於每個 round 個別必備檔案。
+
 viewer 相關輸出目前位於：
 
 - `source/round1/viewer/timeline.json`
 - `source/round1/viewer/viewer-state.json`
 - `source/round1/viewer/round-meta.json`
 - `source/round1/viewer/thumbnails/*`
+- `source/round1/artifacts/har-captures/sampling/*`
+
+其中 `sampling/` 目前會固定輸出前 10 秒、每秒一張的保底取樣圖，方便人工快速回看登入前置畫面與時間對齊。
 
 這三份資料共同構成：
 
@@ -183,4 +217,4 @@ viewer 相關輸出目前位於：
 
 ## 下一步
 
-目前請以 [issue/issue-11/plan.md](./issue/issue-11/plan.md) 作為目前要執行的主計畫，以 [issue/issue-11/impl.md](./issue/issue-11/impl.md) 作為本輪執行紀錄，並以 [AGENTS.md](./AGENTS.md) 作為 AI 協作入口。
+目前請以 [issue/issue-12/plan.md](./issue/issue-12/plan.md) 作為目前要執行的主計畫，以 [issue/issue-12/impl.md](./issue/issue-12/impl.md) 作為本輪執行紀錄，並以 [AGENTS.md](./AGENTS.md) 作為 AI 協作入口。
