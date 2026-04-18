@@ -33,6 +33,13 @@
   - `zoom / selectedGroupIds`
   - `requestKindFilter / requestUrlPattern`
   - `RESET` 可回到預設控制台狀態
+- 點擊 HAR 卡片可在下方展開 detail panel
+  - `Response Text`
+  - `Response`
+  - `Request`
+  - `Header`
+  - 預設打開 `Response Text`
+  - 再點同一筆可收起
 - JSF HAR 分類：
   - `document-get`
   - `document-post`
@@ -95,3 +102,5 @@ Round 管理建議流程：
 - `RESET` 目前會把起終點、隱藏圖、offset、zoom、group filter、HAR kinds 與 regex 一次回復預設值。
 - 這版已支援多個 `round` 列表，但目前實際驗證資料仍以 `round1` 為主。
 - HAR URL regex 使用 JavaScript regular expression；若 pattern 寫錯，UI 會提示錯誤並暫不套用 regex 過濾。
+- HAR 明細目前在 `prepare:rounds` 階段先整理成字串摘要放入 `timeline.json`；若後續 round 量體持續放大，可能需要再改成懶載入。
+- `Response Text` 會優先提供解碼、去除 HTML tag、並截斷後的 response 純文字，方便直接閱讀回應本文；`Response` 則保留狀態與 body 的完整摘要。

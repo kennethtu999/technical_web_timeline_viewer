@@ -161,6 +161,7 @@ export function useTimelineModel() {
   const hideEditMode = ref(false);
   const draftStartTarget = ref(null);
   const draftEndTarget = ref(null);
+  const activeRequestDetail = ref(null);
 
   let saveTimer = null;
   let suppressAutoSave = false;
@@ -257,6 +258,7 @@ export function useTimelineModel() {
       selectedSliceId.value = rawTimeline.value?.slices?.[0]?.id ?? null;
       draftStartTarget.value = null;
       draftEndTarget.value = null;
+      activeRequestDetail.value = null;
       interactionMode.value = "inspect";
       hideEditMode.value = false;
       saveStatus.value = "idle";
@@ -564,6 +566,24 @@ export function useTimelineModel() {
 
   const activeOffsetCount = computed(() => Object.keys(viewerState.value.offsets || {}).length);
 
+  watch(
+    visibleSlices,
+    (nextSlices) => {
+      if (!activeRequestDetail.value) {
+        return;
+      }
+
+      const matchedEvent = nextSlices
+        .find((slice) => slice.id === activeRequestDetail.value.sliceId)
+        ?.requestEvents.find((event) => event.id === activeRequestDetail.value.eventId);
+
+      if (!matchedEvent) {
+        activeRequestDetail.value = null;
+      }
+    },
+    { immediate: true }
+  );
+
   function cleanupGroups(groupList) {
     return groupList.filter((group) => group.sliceIds.length > 0);
   }
@@ -804,6 +824,7 @@ export function useTimelineModel() {
     hideEditMode.value = false;
     draftStartTarget.value = null;
     draftEndTarget.value = null;
+    activeRequestDetail.value = null;
     interactionMode.value = "inspect";
   }
 
@@ -839,6 +860,20 @@ export function useTimelineModel() {
   function handleLaneEventClick(sliceId, event, sourceType) {
     selectedSliceId.value = sliceId;
 
+    if (sourceType === "request" && interactionMode.value === "inspect") {
+      const isSameTarget =
+        activeRequestDetail.value?.sliceId === sliceId &&
+        activeRequestDetail.value?.eventId === event.id;
+
+      activeRequestDetail.value = isSameTarget
+        ? null
+        : {
+            sliceId,
+            eventId: event.id,
+          };
+      return;
+    }
+
     if (interactionMode.value === "start") {
       const slice = visibleSlices.value.find((candidate) => candidate.id === sliceId);
       draftStartTarget.value = createAnchorTarget(sourceType, event, slice);
@@ -847,6 +882,7 @@ export function useTimelineModel() {
 
   return {
     activeOffsetCount,
+    activeRequestDetail,
     apiWritable,
     draftEndTarget,
     draftStartTarget,

@@ -20,6 +20,16 @@ const ALL_GROUPS_VALUE = "__all__";
 const DEFAULT_ZOOM = 0.05;
 const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 0.18;
+const HAR_DETAIL_TEXT_LIMIT = 12000;
+const HAR_HEADER_LINE_LIMIT = 120;
+const HTML_ENTITY_MAP = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
 
 const CANONICAL_INPUTS = {
   video: "video.mp4",
@@ -295,6 +305,204 @@ function findSliceByAbsoluteMs(slices, absoluteMs) {
   );
 }
 
+function decodeHtmlEntities(text) {
+  return String(text || "").replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
+    const normalizedEntity = String(entity || "").toLowerCase();
+    if (normalizedEntity.startsWith("#x")) {
+      const codePoint = Number.parseInt(normalizedEntity.slice(2), 16);
+      if (!Number.isFinite(codePoint)) {
+        return match;
+      }
+      try {
+        return String.fromCodePoint(codePoint);
+      } catch {
+        return match;
+      }
+    }
+
+    if (normalizedEntity.startsWith("#")) {
+      const codePoint = Number.parseInt(normalizedEntity.slice(1), 10);
+      if (!Number.isFinite(codePoint)) {
+        return match;
+      }
+      try {
+        return String.fromCodePoint(codePoint);
+      } catch {
+        return match;
+      }
+    }
+
+    return HTML_ENTITY_MAP[normalizedEntity] ?? match;
+  });
+}
+
+function truncateHarDetailText(text, limit = HAR_DETAIL_TEXT_LIMIT) {
+  const normalizedText = decodeHtmlEntities(text);
+  if (!normalizedText) {
+    return "";
+  }
+
+  if (normalizedText.length <= limit) {
+    return normalizedText;
+  }
+
+  return `${normalizedText.slice(0, limit)}\n\n[truncated ${normalizedText.length - limit} chars]`;
+}
+
+function formatHarHeaders(headers) {
+  const normalizedHeaders = Array.isArray(headers) ? headers : [];
+  if (!normalizedHeaders.length) {
+    return "(none)";
+  }
+
+  const lines = normalizedHeaders
+    .slice(0, HAR_HEADER_LINE_LIMIT)
+    .map(
+      (header) =>
+        `${decodeHtmlEntities(header.name || "(unnamed)")}: ${decodeHtmlEntities(
+          header.value || ""
+        )}`
+    );
+
+  if (normalizedHeaders.length > HAR_HEADER_LINE_LIMIT) {
+    lines.push(
+      `[truncated ${normalizedHeaders.length - HAR_HEADER_LINE_LIMIT} header lines]`
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function formatHarQueryString(queryString) {
+  const items = Array.isArray(queryString) ? queryString : [];
+  if (!items.length) {
+    return "";
+  }
+
+  return items
+    .map(
+      (item) =>
+        `${decodeHtmlEntities(item.name || "(unnamed)")}=${decodeHtmlEntities(item.value || "")}`
+    )
+    .join("\n");
+}
+
+function decodeHarResponseText(content) {
+  const rawText = content?.text;
+  if (!rawText) {
+    return "";
+  }
+
+  if (String(content?.encoding || "").toLowerCase() !== "base64") {
+    return rawText;
+  }
+
+  try {
+    return Buffer.from(rawText, "base64").toString("utf-8");
+  } catch {
+    return "[base64 decode failed]";
+  }
+}
+
+function looksLikeHtmlText(text, mimeType = "") {
+  const normalizedMime = String(mimeType || "").toLowerCase();
+  if (normalizedMime.includes("html") || normalizedMime.includes("xml")) {
+    return true;
+  }
+
+  const sample = String(text || "").slice(0, 400);
+  return /<\s*(html|body|head|div|span|table|tr|td|th|option|select|form|script|style)\b/i.test(
+    sample
+  );
+}
+
+function extractPlainTextFromHtml(text) {
+  const decodedText = decodeHtmlEntities(text);
+  const withBreaks = decodedText
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(
+      /<\/(p|div|section|article|header|footer|li|tr|td|th|h[1-6]|option|select|ul|ol|table|form|fieldset|label)\s*>/gi,
+      "\n"
+    )
+    .replace(/<[^>]+>/g, " ");
+
+  const normalizedLines = withBreaks
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  return normalizedLines.join("\n");
+}
+
+function formatDetailMetaLines(entries) {
+  return entries
+    .filter(([, value]) => value != null && String(value) !== "")
+    .map(([label, value]) => `${decodeHtmlEntities(label)}: ${decodeHtmlEntities(value)}`)
+    .join("\n");
+}
+
+function buildHarRequestDetail(entry) {
+  const request = entry.request || {};
+  const queryString = formatHarQueryString(request.queryString);
+  const postData = request.postData || {};
+  const bodyText = truncateHarDetailText(postData.text || "");
+  const meta = formatDetailMetaLines([
+    ["Method", request.method || "GET"],
+    ["URL", request.url || ""],
+    ["HTTP", request.httpVersion || ""],
+    ["Body MIME", postData.mimeType || ""],
+  ]);
+
+  const sections = [meta];
+  if (queryString) {
+    sections.push(`Query\n${truncateHarDetailText(queryString)}`);
+  }
+  sections.push(`Body\n${bodyText || "(empty)"}`);
+
+  return sections.filter(Boolean).join("\n\n");
+}
+
+function buildHarResponseDetail(entry) {
+  const response = entry.response || {};
+  const content = response.content || {};
+  const bodyText = truncateHarDetailText(decodeHarResponseText(content));
+  const meta = formatDetailMetaLines([
+    ["Status", response.status ?? 0],
+    ["Status Text", response.statusText || ""],
+    ["Redirect", response.redirectURL || ""],
+    ["MIME", content.mimeType || ""],
+    ["Encoding", content.encoding || ""],
+    ["Body Size", content.size ?? ""],
+  ]);
+
+  return [meta, `Body\n${bodyText || "(empty)"}`].filter(Boolean).join("\n\n");
+}
+
+function buildHarResponseText(entry) {
+  const content = entry.response?.content || {};
+  const rawBodyText = decodeHarResponseText(content);
+  const readableText = looksLikeHtmlText(rawBodyText, content.mimeType)
+    ? extractPlainTextFromHtml(rawBodyText)
+    : rawBodyText;
+
+  return truncateHarDetailText(readableText) || "(empty)";
+}
+
+function buildHarHeaderDetail(entry) {
+  return [
+    "Request Headers",
+    formatHarHeaders(entry.request?.headers),
+    "",
+    "Response Headers",
+    formatHarHeaders(entry.response?.headers),
+  ].join("\n");
+}
+
 function enrichRecordingEvents(recording, slices, manifest) {
   const steps = recording.steps || [];
   const durationMs = Math.round((manifest.duration_seconds || 0) * 1000);
@@ -347,6 +555,12 @@ function enrichHarEvents(har, slices) {
         absoluteTimestamp: startedAt,
         targetSliceId: slice.id,
         durationMs: Math.round(entry.time || 0),
+        detail: {
+          request: buildHarRequestDetail(entry),
+          response: buildHarResponseDetail(entry),
+          responseText: buildHarResponseText(entry),
+          headers: buildHarHeaderDetail(entry),
+        },
       };
     })
     .filter(Boolean);

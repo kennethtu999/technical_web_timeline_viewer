@@ -375,6 +375,11 @@ select {
   gap: 8px;
 }
 
+.request-event-stack {
+  display: grid;
+  gap: 10px;
+}
+
 .lane-event {
   display: grid;
   gap: 4px;
@@ -404,8 +409,63 @@ select {
   border-left: 4px solid #1f6feb;
 }
 
+.request-event.active {
+  box-shadow: 0 14px 30px rgba(31, 111, 235, 0.14);
+  background: rgba(255, 255, 255, 0.98);
+}
+
 .recording-event {
   border-left: 4px solid #7b9acc;
+}
+
+.request-detail-panel {
+  display: grid;
+  gap: 12px;
+  width: min(760px, calc(100vw - 180px));
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(53, 92, 125, 0.16);
+  background: rgba(248, 250, 253, 0.98);
+  box-shadow: 0 16px 36px rgba(53, 92, 125, 0.12);
+  position: relative;
+  z-index: 3;
+}
+
+.request-detail-section {
+  display: grid;
+  gap: 8px;
+}
+
+.request-detail-tabs {
+  width: 100%;
+}
+
+.request-detail-tabs :is(.n-tabs-nav) {
+  margin-bottom: 8px;
+}
+
+.request-detail-title {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #536275;
+}
+
+.request-detail-code {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid rgba(53, 92, 125, 0.1);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #243041;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .event-topline {
@@ -525,5 +585,9 @@ strong {
 
   .stats-stack {
     grid-template-columns: 1fr;
+  }
+
+  .request-detail-panel {
+    width: min(640px, calc(100vw - 120px));
   }
 }

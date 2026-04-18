@@ -30,6 +30,7 @@ onMounted(() => {
       <main class="app-shell">
         <TimelineViewer
           :active-offset-count="timeline.activeOffsetCount.value"
+          :active-request-detail="timeline.activeRequestDetail.value"
           :api-writable="timeline.apiWritable.value"
           :draft-end-target="timeline.draftEndTarget.value"
           :draft-start-target="timeline.draftStartTarget.value"

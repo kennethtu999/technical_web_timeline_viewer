@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import {
   NButton,
   NCard,
@@ -11,6 +11,8 @@ import {
   NSelect,
   NSkeleton,
   NSlider,
+  NTabPane,
+  NTabs,
   NTag,
 } from "naive-ui";
 
@@ -18,6 +20,10 @@ const props = defineProps({
   activeOffsetCount: {
     type: Number,
     default: 0,
+  },
+  activeRequestDetail: {
+    type: Object,
+    default: null,
   },
   apiWritable: {
     type: Boolean,
@@ -151,6 +157,18 @@ const roundOptions = computed(() =>
 const expandedLaneKeys = ref(new Set());
 const requestLaneHeight = computed(() => laneHeightFor("requestEvents"));
 const recordingLaneHeight = computed(() => laneHeightFor("recordingEvents"));
+const REQUEST_DETAIL_PANEL_HEIGHT = 420;
+const activeRequestDetailTab = ref("response-text");
+
+watch(
+  () => props.activeRequestDetail,
+  (nextDetail) => {
+    if (nextDetail) {
+      activeRequestDetailTab.value = "response-text";
+    }
+  },
+  { deep: true }
+);
 
 function laneEvents(slice, laneKey) {
   return laneKey === "requestEvents" ? slice.requestEvents : slice.recordingEvents;
@@ -187,14 +205,31 @@ function visibleLaneEvents(slice, laneKey) {
   return events.slice(0, 2);
 }
 
+function isRequestDetailOpen(sliceId, eventId) {
+  return (
+    props.activeRequestDetail?.sliceId === sliceId &&
+    props.activeRequestDetail?.eventId === eventId
+  );
+}
+
+function requestDetailHeightFor(slice) {
+  const activeEvent = visibleLaneEvents(slice, "requestEvents").find((event) =>
+    isRequestDetailOpen(slice.id, event.id)
+  );
+
+  return activeEvent ? REQUEST_DETAIL_PANEL_HEIGHT : 0;
+}
+
 function laneHeightFor(laneKey) {
-  const maxEvents = props.slices.reduce((currentMax, slice) => {
+  const maxHeight = props.slices.reduce((currentMax, slice) => {
     const visibleCount = visibleLaneEvents(slice, laneKey).length;
     const toggleCount = hasCollapsedLaneEvents(slice, laneKey) ? 1 : 0;
-    return Math.max(currentMax, visibleCount + toggleCount);
+    const baseHeight = visibleCount * 82 + toggleCount * 44;
+    const detailHeight = laneKey === "requestEvents" ? requestDetailHeightFor(slice) : 0;
+    return Math.max(currentMax, baseHeight + detailHeight);
   }, 0);
 
-  return Math.max(184, maxEvents * 82 + 28);
+  return Math.max(184, maxHeight + 28);
 }
 
 function groupSpan(group, slices) {
@@ -433,23 +468,76 @@ function anchorTagType(anchor, draftAnchor) {
                     left: `${slice.displayLeftPx}px`,
                   }"
                 >
-                  <button
+                  <div
                     v-for="event in visibleLaneEvents(slice, 'requestEvents')"
                     :key="event.id"
-                    class="lane-event request-event"
-                    type="button"
-                    :style="{ borderColor: event.color }"
-                    @click.stop="emit('handle-lane-event-click', slice.id, event, 'request')"
+                    class="request-event-stack"
                   >
-                    <div class="event-topline">
-                      <n-tag size="small" :bordered="false" :color="{ color: event.color, textColor: '#fff' }">
-                        {{ event.kind }}
-                      </n-tag>
-                      <span>{{ event.method }} {{ event.status }}</span>
+                    <button
+                      class="lane-event request-event"
+                      :class="{ active: isRequestDetailOpen(slice.id, event.id) }"
+                      type="button"
+                      :style="{ borderColor: event.color }"
+                      @click.stop="emit('handle-lane-event-click', slice.id, event, 'request')"
+                    >
+                      <div class="event-topline">
+                        <n-tag
+                          size="small"
+                          :bordered="false"
+                          :color="{ color: event.color, textColor: '#fff' }"
+                        >
+                          {{ event.kind }}
+                        </n-tag>
+                        <span>{{ event.method }} {{ event.status }}</span>
+                      </div>
+                      <div class="event-title">{{ event.pathname }}</div>
+                      <div class="event-subline">
+                        <span>{{ event.durationMs }} ms</span>
+                        <span>{{ isRequestDetailOpen(slice.id, event.id) ? "點擊收起" : "點擊展開" }}</span>
+                      </div>
+                    </button>
+                    <div
+                      v-if="isRequestDetailOpen(slice.id, event.id)"
+                      class="request-detail-panel"
+                      @click.stop
+                    >
+                      <n-tabs
+                        v-model:value="activeRequestDetailTab"
+                        type="line"
+                        animated
+                        class="request-detail-tabs"
+                      >
+                        <n-tab-pane name="response-text" tab="Response Text">
+                          <section class="request-detail-section">
+                            <pre class="request-detail-code">{{
+                              event.detail?.responseText || "(empty)"
+                            }}</pre>
+                          </section>
+                        </n-tab-pane>
+                        <n-tab-pane name="response" tab="Response">
+                          <section class="request-detail-section">
+                            <pre class="request-detail-code">{{
+                              event.detail?.response || `Status: ${event.status}`
+                            }}</pre>
+                          </section>
+                        </n-tab-pane>
+                        <n-tab-pane name="request" tab="Request">
+                          <section class="request-detail-section">
+                            <pre class="request-detail-code">{{
+                              event.detail?.request || `${event.method} ${event.url || event.pathname}`
+                            }}</pre>
+                          </section>
+                        </n-tab-pane>
+                        <n-tab-pane name="headers" tab="Header">
+                          <section class="request-detail-section">
+                            <pre class="request-detail-code">{{
+                              event.detail?.headers || "(none)"
+                            }}</pre>
+                          </section>
+                        </n-tab-pane>
+                      </n-tabs>
                     </div>
-                    <div class="event-title">{{ event.pathname }}</div>
-                    <div class="event-subline">{{ event.durationMs }} ms</div>
-                  </button>
+                  </div>
                   <button
                     v-if="hasCollapsedLaneEvents(slice, 'requestEvents')"
                     class="lane-toggle-button"

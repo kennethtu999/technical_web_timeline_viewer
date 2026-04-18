@@ -100,6 +100,11 @@
   - 同時間點超過兩筆時，預設只顯示前兩筆
   - 可點 `更多` 展開
   - 可再點 `收起`
+- HAR 卡片可點擊展開 detail panel：
+  - 以 Tabs 顯示 `Response Text / Response / Request / Header`
+  - 預設打開 `Response Text`
+  - `Response Text` 會盡量去除 HTML tag，改顯示可讀純文字
+  - 再點同一筆可收起
 - 右側 `Control Panel` 可設定：
   - 起始點
   - 結束點
@@ -178,4 +183,4 @@ viewer 相關輸出目前位於：
 
 ## 下一步
 
-目前請以 [issue/issue-8/plan.md](./issue/issue-8/plan.md) 作為目前要執行的主計畫，以 [issue/issue-8/impl.md](./issue/issue-8/impl.md) 作為本輪執行紀錄，並以 [AGENTS.md](./AGENTS.md) 作為 AI 協作入口。
+目前請以 [issue/issue-11/plan.md](./issue/issue-11/plan.md) 作為目前要執行的主計畫，以 [issue/issue-11/impl.md](./issue/issue-11/impl.md) 作為本輪執行紀錄，並以 [AGENTS.md](./AGENTS.md) 作為 AI 協作入口。
