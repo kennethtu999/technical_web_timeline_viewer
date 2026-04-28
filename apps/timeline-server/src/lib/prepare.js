@@ -48,6 +48,116 @@ import {
 } from "./prepare/video.js";
 
 const __filename = fileURLToPath(import.meta.url);
+const AUTO_GROUP_COLORS = ["#355c7d", "#c95f34", "#3a7a6d", "#6b8f2a", "#8f4d76", "#1f6feb"];
+
+function hashText(value) {
+  return Array.from(String(value || "")).reduce(
+    (result, char) => (result * 31 + char.charCodeAt(0)) >>> 0,
+    0
+  );
+}
+
+function colorForTransactionKey(transactionKey) {
+  return AUTO_GROUP_COLORS[hashText(transactionKey) % AUTO_GROUP_COLORS.length];
+}
+
+function slugifyTransactionKey(transactionKey) {
+  const slug = String(transactionKey || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "transaction";
+}
+
+function addSliceToGroup(slice, group) {
+  if (!slice || !group) {
+    return;
+  }
+
+  if (!Array.isArray(slice.groupIds)) {
+    slice.groupIds = [];
+  }
+
+  if (!slice.groupIds.includes(group.id)) {
+    slice.groupIds.push(group.id);
+  }
+
+  if (!group.sliceIds.includes(slice.id)) {
+    group.sliceIds.push(slice.id);
+  }
+}
+
+function finalizeTransactionGroupLabels(groups) {
+  const totalCountByKey = groups.reduce((result, group) => {
+    if (!group.transactionKey) {
+      return result;
+    }
+
+    result.set(group.transactionKey, (result.get(group.transactionKey) || 0) + 1);
+    return result;
+  }, new Map());
+
+  return groups.map((group) => ({
+    ...group,
+    label:
+      (totalCountByKey.get(group.transactionKey) || 0) > 1
+        ? `${group.transactionKey} #${group.transactionIndex}`
+        : group.transactionKey,
+  }));
+}
+
+function buildAutoTransactionGroups(slices, harEvents) {
+  const groups = [];
+  const harEventMap = new Map(harEvents.map((event) => [event.id, event]));
+  const transactionGroupCount = new Map();
+  let currentTransactionGroup = null;
+
+  function startTransactionGroup(transactionKey) {
+    const transactionIndex = (transactionGroupCount.get(transactionKey) || 0) + 1;
+    transactionGroupCount.set(transactionKey, transactionIndex);
+    const group = {
+      id: `group-tx-${slugifyTransactionKey(transactionKey)}-${String(transactionIndex).padStart(2, "0")}`,
+      label: transactionKey,
+      color: colorForTransactionKey(transactionKey),
+      sliceIds: [],
+      transactionKey,
+      transactionIndex,
+      type: "transaction-auto",
+    };
+    groups.push(group);
+    currentTransactionGroup = group;
+    return group;
+  }
+
+  for (const slice of slices) {
+    const sourceEvent = harEventMap.get(slice.sourceEventId);
+    const pageGroupHint = sourceEvent?.pageGroupHint;
+    if (!pageGroupHint?.isJsfDocument) {
+      continue;
+    }
+
+    const transactionKey = String(pageGroupHint.transactionKey || "").trim().toUpperCase() || null;
+    let targetGroup = null;
+
+    if (pageGroupHint.isTxPageHandler && transactionKey) {
+      targetGroup = startTransactionGroup(transactionKey);
+    } else if (transactionKey) {
+      targetGroup =
+        currentTransactionGroup?.transactionKey === transactionKey
+          ? currentTransactionGroup
+          : startTransactionGroup(transactionKey);
+    } else if (pageGroupHint.canInheritCurrentGroup && currentTransactionGroup) {
+      targetGroup = currentTransactionGroup;
+    }
+
+    if (targetGroup) {
+      addSliceToGroup(slice, targetGroup);
+    }
+  }
+
+  return finalizeTransactionGroupLabels(groups);
+}
 
 function normalizeConfiguredVideoMs(value) {
   const numericValue = Number(value);
@@ -130,24 +240,27 @@ export function resolveEffectiveVideoStart({
   };
 }
 
-function buildInitialGroups(slices) {
+export function buildInitialGroups(slices, harEvents = []) {
   const loginAnchorSlice = slices.find((slice) => slice.pageHint === "login-anchor");
   const groups = [];
 
+  for (const slice of slices) {
+    slice.groupIds = Array.isArray(slice.groupIds) ? slice.groupIds : [];
+  }
+
   if (loginAnchorSlice) {
-    groups.push({
+    const loginGroup = {
       id: "group-login-anchor",
       label: "Login Anchor",
       color: "#c95f34",
       sliceIds: [loginAnchorSlice.id],
-    });
+      type: "login-anchor",
+    };
+    groups.push(loginGroup);
+    addSliceToGroup(loginAnchorSlice, loginGroup);
   }
 
-  for (const slice of slices) {
-    slice.groupIds = groups
-      .filter((group) => group.sliceIds.includes(slice.id))
-      .map((group) => group.id);
-  }
+  groups.push(...buildAutoTransactionGroups(slices, harEvents));
 
   return {
     groups,
@@ -607,7 +720,7 @@ export async function prepareRound(roundId) {
 
   const harEvents = enrichHarEvents(har);
   attachEventsToSlices(slices, harEvents, recordingEvents);
-  const { groups, loginAnchorSlice: groupedLoginAnchorSlice } = buildInitialGroups(slices);
+  const { groups, loginAnchorSlice: groupedLoginAnchorSlice } = buildInitialGroups(slices, harEvents);
 
   const validSliceIds = new Set(slices.map((slice) => slice.id));
   const validGroupIds = new Set(groups.map((group) => group.id));

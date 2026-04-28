@@ -135,7 +135,11 @@
   - `POST` 取 `request - 0.5 秒` 與 `response + 0.5 秒`
   - 目前只取 `Content-Type` prefix 為 `text/htm` 的 `GET / POST`
 - 可選讀 `source/baseline/page_login.jpg` 與 `source/round{n}/round_config.json` 作為登入開始錨點
-- `Groups` 水道可直接用 `+ / -` 決定：
+- `Groups` 水道會先依交易代號自動分群：
+  - `TxPageHandler?taskID=...` 會開新的交易 group
+  - `TxPageHandler?appID=...` 會以功能大類先建立 group
+  - 非 `TxPageHandler` 的 JSF 頁面會先看 URL 代號，必要時再用 FORM 排除共用殼層
+- 若自動 group 不足，仍可直接用 `+ / -` 補調：
   - `+` 建立新群組
   - `-` 加入前一個群組
 - `Recording` 與 `HAR` 水道支援收合：

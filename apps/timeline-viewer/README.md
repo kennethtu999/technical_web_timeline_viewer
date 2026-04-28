@@ -18,6 +18,9 @@
   - recording steps
 - 以 HAR-driven thumbnail slice 為主要切面
 - slice group
+  - 初始會先依交易代號自動建立 group
+  - `TxPageHandler?taskID=...` 會切出新 group
+  - `TxPageHandler?appID=...` 會先以功能大類建立 group
 - `+/- offset ms`
 - thumbnail hover preview
 - focus preview 放大兩級

@@ -20,6 +20,100 @@ const HTML_ENTITY_MAP = {
   apos: "'",
   nbsp: " ",
 };
+const SHARED_FORM_IDS = new Set(["head", "main"]);
+const TX_QUERY_PARAM_NAMES = ["taskID", "txCode", "txnCode"];
+
+function extractFormIds(text) {
+  return [...String(text || "").matchAll(/<form[^>]*id=["']([^"']+)["']/gi)].map((match) => match[1]);
+}
+
+function buildFormInfo(rawHtmlText) {
+  const formIds = extractFormIds(rawHtmlText);
+  const nonSharedFormIds = formIds.filter((formId) => !SHARED_FORM_IDS.has(formId));
+  return {
+    formIds,
+    nonSharedFormIds,
+    hasOnlySharedForms: formIds.length > 0 && nonSharedFormIds.length === 0,
+  };
+}
+
+function extractPathTransactionCode(pathname) {
+  const normalizedPathname = String(pathname || "");
+  if (!normalizedPathname.includes("/EB/")) {
+    return null;
+  }
+
+  const fileName = normalizedPathname.split("/").at(-1) || "";
+  const bankStyleMatch = fileName.match(/^([A-Z]{3}\d{3,})(?:[A-Za-z0-9_@-]*)\.faces$/);
+  if (bankStyleMatch) {
+    return bankStyleMatch[1];
+  }
+
+  const shortCodeMatch = fileName.match(/^([0-9A-Z]{4})(?:[A-Za-z0-9_@-]*)\.faces$/);
+  return shortCodeMatch?.[1] || null;
+}
+
+function extractTransactionKeyFromUrl(url, pathname) {
+  try {
+    const parsedUrl = new URL(String(url || ""));
+    for (const paramName of TX_QUERY_PARAM_NAMES) {
+      const normalizedValue = String(parsedUrl.searchParams.get(paramName) || "")
+        .trim()
+        .toUpperCase();
+      if (normalizedValue) {
+        return {
+          key: normalizedValue,
+          source: `query:${paramName}`,
+        };
+      }
+    }
+
+    const appId = String(parsedUrl.searchParams.get("appID") || "").trim().toUpperCase();
+    if (appId) {
+      return {
+        key: appId,
+        source: "query:appID",
+      };
+    }
+  } catch {
+    // Ignore URL parse failures and continue with pathname-based extraction.
+  }
+
+  const pathCode = extractPathTransactionCode(pathname);
+  if (pathCode) {
+    return {
+      key: pathCode,
+      source: "pathname",
+    };
+  }
+
+  return {
+    key: null,
+    source: null,
+  };
+}
+
+function buildPageGroupHint(entry, kind, pathname) {
+  const rawBodyText = decodeHarResponseText(entry.response?.content || {});
+  const formInfo = buildFormInfo(rawBodyText);
+  const normalizedPathname = String(pathname || "");
+  const isJsfDocument = kind === "document-get" || kind === "document-post";
+  const isTxPageHandler = /\/TxPageHandler$/i.test(normalizedPathname);
+  const transactionKey = extractTransactionKeyFromUrl(entry.request?.url || "", normalizedPathname);
+  const hasTransactionKey = Boolean(transactionKey.key);
+
+  return {
+    isJsfDocument,
+    isTxPageHandler,
+    transactionKey: transactionKey.key,
+    transactionSource: transactionKey.source,
+    formIds: formInfo.formIds,
+    nonSharedFormIds: formInfo.nonSharedFormIds,
+    hasOnlySharedForms: formInfo.hasOnlySharedForms,
+    canInheritCurrentGroup:
+      isJsfDocument && !hasTransactionKey && formInfo.nonSharedFormIds.length > 0,
+  };
+}
 
 function getResponseContentType(entry) {
   const fromContent = entry.response?.content?.mimeType;
@@ -296,6 +390,7 @@ function buildHarEvent(entry, index) {
     pathname,
     absoluteTimestamp: startedAt,
     durationMs: Math.round(entry.time || 0),
+    pageGroupHint: buildPageGroupHint(entry, kind, pathname),
     detail: {
       request: buildHarRequestDetail(entry),
       response: buildHarResponseDetail(entry),
