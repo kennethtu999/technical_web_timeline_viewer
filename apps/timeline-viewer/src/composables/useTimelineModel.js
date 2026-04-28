@@ -159,12 +159,7 @@ function arraysEqual(left, right) {
 }
 
 function normalizeRecordingGroupMode(rawMode) {
-  const allowedModes = new Set([
-    DEFAULT_RECORDING_GROUP_MODE,
-    "hide",
-    "shift-left",
-    "shift-right",
-  ]);
+  const allowedModes = new Set([DEFAULT_RECORDING_GROUP_MODE, "hide"]);
   return allowedModes.has(rawMode) ? rawMode : DEFAULT_RECORDING_GROUP_MODE;
 }
 
@@ -214,29 +209,46 @@ function buildRecordingGroups(slices, recordingGroupStates) {
     groups.push(currentGroup);
   }
 
+  const sliceIndexById = new Map(visibleSlices.map((slice, index) => [slice.id, index]));
+  const maxSliceIndex = Math.max(0, visibleSlices.length - 1);
+  let cumulativeShiftSteps = 0;
+
   return groups.map((group, index) => {
     const mode = normalizeRecordingGroupMode(stateMap[group.id]?.mode);
-    const shiftPx =
-      mode === "shift-left"
-        ? -RECORDING_GROUP_SHIFT_PX
-        : mode === "shift-right"
-          ? RECORDING_GROUP_SHIFT_PX
-          : 0;
+    const localShiftSteps = Number(stateMap[group.id]?.shiftSteps || 0);
+    cumulativeShiftSteps += Number.isFinite(localShiftSteps) ? localShiftSteps : 0;
+
+    const sourceStartIndex = sliceIndexById.get(group.startSliceId) ?? 0;
+    const sourceEndIndex = sliceIndexById.get(group.endSliceId) ?? sourceStartIndex;
+    const mappedStartIndex = Math.min(
+      maxSliceIndex,
+      Math.max(0, sourceStartIndex + cumulativeShiftSteps)
+    );
+    const mappedEndIndex = Math.min(maxSliceIndex, Math.max(0, sourceEndIndex + cumulativeShiftSteps));
+    const mappedStartSlice = visibleSlices[mappedStartIndex] || visibleSlices[0] || null;
+    const mappedEndSlice = visibleSlices[mappedEndIndex] || mappedStartSlice;
+
+    const mappedLeftPx = mappedStartSlice?.displayLeftPx ?? group.firstDisplayLeftPx;
+    const mappedWidthPx = mappedEndSlice
+      ? Math.max(
+          mappedEndSlice.displayLeftPx + mappedEndSlice.displayWidthPx - mappedLeftPx,
+          THUMBNAIL_SLICE_WIDTH_PX
+        )
+      : THUMBNAIL_SLICE_WIDTH_PX;
 
     return {
       id: group.id,
       orderIndex: index,
       sliceIds: group.sliceIds,
-      startSliceId: group.startSliceId,
-      endSliceId: group.endSliceId,
+      startSliceId: mappedStartSlice?.id || group.startSliceId,
+      endSliceId: mappedEndSlice?.id || group.endSliceId,
       label: recordingGroupStepLabel(group.events),
       summary: `${group.events.length} 筆 recording`,
       events: group.events,
       mode,
-      leftPx: group.firstDisplayLeftPx,
-      widthPx:
-        group.lastDisplayLeftPx + group.lastDisplayWidthPx - group.firstDisplayLeftPx,
-      shiftPx,
+      leftPx: mappedLeftPx,
+      widthPx: mappedWidthPx,
+      shiftPx: 0,
     };
   });
 }
@@ -584,10 +596,9 @@ export function useTimelineModel() {
       };
     });
 
-    const rotatedSlices = rotateSlices(baseSlices, viewerState.value.startAnchor?.sliceId);
     const hiddenFilteredSlices = hideEditMode.value
-      ? rotatedSlices
-      : rotatedSlices.filter((slice) => !slice.isHidden);
+      ? baseSlices
+      : baseSlices.filter((slice) => !slice.isHidden);
 
     const allVisibleOrderMap = new Map(hiddenFilteredSlices.map((slice, index) => [slice.id, index]));
     const sliceGroupMap = new Map();
@@ -944,14 +955,39 @@ export function useTimelineModel() {
   }
 
   function setRecordingGroupMode(groupId, mode) {
+    if (mode === "shift-left" || mode === "shift-right") {
+      const direction = mode === "shift-left" ? -1 : 1;
+      const nextStates = { ...(viewerState.value.recordingGroupStates || {}) };
+      const nextMode = normalizeRecordingGroupMode(nextStates[groupId]?.mode);
+      const currentShiftSteps = Number(nextStates[groupId]?.shiftSteps || 0);
+      const updatedShiftSteps = currentShiftSteps + direction;
+
+      if (!updatedShiftSteps && nextMode === DEFAULT_RECORDING_GROUP_MODE) {
+        delete nextStates[groupId];
+      } else {
+        nextStates[groupId] = {
+          mode: nextMode,
+          shiftSteps: updatedShiftSteps,
+        };
+      }
+
+      viewerState.value = {
+        ...viewerState.value,
+        recordingGroupStates: nextStates,
+      };
+      return;
+    }
+
     const nextMode = normalizeRecordingGroupMode(mode);
     const nextStates = { ...(viewerState.value.recordingGroupStates || {}) };
+    const currentShiftSteps = Number(nextStates[groupId]?.shiftSteps || 0);
 
-    if (nextMode === DEFAULT_RECORDING_GROUP_MODE) {
+    if (nextMode === DEFAULT_RECORDING_GROUP_MODE && !currentShiftSteps) {
       delete nextStates[groupId];
     } else {
       nextStates[groupId] = {
         mode: nextMode,
+        shiftSteps: currentShiftSteps,
       };
     }
 

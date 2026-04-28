@@ -433,13 +433,19 @@ select {
 
 .event-topline {
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: 10px;
+}
+
+.event-topline :is(.n-tag__content) {
+  font-size: 10px;
 }
 
 .event-title {
-  font-size: 13px;
-  line-height: 1.35;
+  font-size: 11px;
+  line-height: 1.3;
   color: #243041;
+  white-space: normal;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 

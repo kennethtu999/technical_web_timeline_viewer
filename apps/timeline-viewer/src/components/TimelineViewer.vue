@@ -351,6 +351,7 @@ function anchorTagType(anchor, draftAnchor) {
   }
   return "default";
 }
+
 </script>
 
 <template>
@@ -551,6 +552,7 @@ function anchorTagType(anchor, draftAnchor) {
                   class="lane-slice-panel"
                   :style="{
                     left: `${slice.displayLeftPx}px`,
+                    width: `${slice.thumbnailDisplayWidthPx}px`,
                   }"
                 >
                   <div
@@ -566,20 +568,17 @@ function anchorTagType(anchor, draftAnchor) {
                       @click.stop="emit('handle-lane-event-click', slice.id, event, 'request')"
                     >
                       <div class="event-topline">
+                        <span>{{ event.method }} {{ event.status }}</span>
                         <n-tag
                           size="small"
                           :bordered="false"
                           :color="{ color: event.color, textColor: '#fff' }"
                         >
-                          {{ event.kind }}
+                        <span>{{ event.durationMs }} ms</span>
                         </n-tag>
-                        <span>{{ event.method }} {{ event.status }}</span>
                       </div>
                       <div class="event-title">{{ event.pathname }}</div>
-                      <div class="event-subline">
-                        <span>{{ event.durationMs }} ms</span>
-                        <span>{{ isRequestDetailOpen(slice.id, event.id) ? "點擊收起" : "點擊展開" }}</span>
-                      </div>
+                      
                     </button>
                     <div
                       v-if="isRequestDetailOpen(slice.id, event.id)"
@@ -730,15 +729,6 @@ function anchorTagType(anchor, draftAnchor) {
                 >
                   全部套用
                 </n-button>
-              </div>
-              <div class="baseline-field-grid">
-                <label class="helper-text">submit_login_page.video_ms</label>
-                <n-input
-                  :value="String(roundConfigState?.config?.submit_login_page?.video_ms ?? '')"
-                  type="text"
-                  readonly
-                  placeholder="請先在 round_config.json 設定"
-                />
               </div>
               <div class="tag-stack">
                 <n-tag size="small" :bordered="false">{{ baselineStatus }}</n-tag>
